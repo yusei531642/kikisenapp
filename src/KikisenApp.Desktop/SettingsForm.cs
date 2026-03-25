@@ -72,6 +72,7 @@ public sealed class SettingsForm : Form
 
         ApplySettingsToUi();
         ReloadAudioDevices();
+        await TryAutoStartVoicevoxAsync();
         await LoadSpeakersAsync();
         UpdateSetupGuide();
     }
@@ -352,9 +353,18 @@ public sealed class SettingsForm : Form
             _settings.InstalledEngineVersion = result.Version;
             await _settingsStore.SaveAsync(_settings);
 
+            var startedNow = await _processManager.StartAsync(
+                result.RunExecutablePath,
+                _settings.EngineBaseUrl,
+                CreateApiClient);
+
             var variantName = FormatVariantName(result.Variant);
-            _setupStatusLabel.Text = $"VOICEVOX ENGINE {variantName} {result.Version} の準備ができました。";
+            _setupStatusLabel.Text = startedNow
+                ? $"VOICEVOX ENGINE {variantName} {result.Version} を起動しました。"
+                : $"VOICEVOX ENGINE {variantName} {result.Version} はすでに起動しています。";
             AppendSetupLog($"VOICEVOX ENGINE {variantName} を {result.RunExecutablePath} に準備しました。");
+            AppendSetupLog(_setupStatusLabel.Text);
+            await LoadSpeakersAsync();
             UpdateSetupGuide();
         }
         catch (Exception ex)
@@ -557,6 +567,32 @@ public sealed class SettingsForm : Form
     private VoicevoxApiClient CreateApiClient()
     {
         return new VoicevoxApiClient(_engineHttpClient);
+    }
+
+    private async Task TryAutoStartVoicevoxAsync()
+    {
+        try
+        {
+            var runExecutablePath = FindRunExecutablePath();
+            if (runExecutablePath is null)
+            {
+                return;
+            }
+
+            var startedNow = await _processManager.StartAsync(
+                runExecutablePath,
+                _settings.EngineBaseUrl,
+                CreateApiClient);
+
+            if (startedNow)
+            {
+                _setupStatusLabel.Text = "VOICEVOX ENGINE を自動で起動しました。";
+                AppendSetupLog(_setupStatusLabel.Text);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static void ConfigureNumeric(NumericUpDown numericUpDown, decimal minimum, decimal maximum, decimal value, decimal increment)

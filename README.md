@@ -18,6 +18,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 - 再生先デバイスを選んで、VB-CABLE などの仮想オーディオへ出力
 - `setup.exe` 実行中に VOICEVOX ENGINE の最新 Windows GPU 版を外部ダウンロード
 - `VB-CABLE Virtual Audio Device` はインストーラー同封のファイルからセットアップ起動
+- `setup.exe` 後にアプリを開くと、見つかった `VOICEVOX ENGINE` を自動で起動しやすい
 - Discord で使うための手順をアプリ内で確認
 - メイン画面は「入力」と「送信」だけにして、細かい設定は `設定` ウィンドウに分離
 
@@ -49,7 +50,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 4. `VB-CABLE` のセットアップ画面が開いたら、管理者権限を許可して完了します。
 5. 必要なら Windows を再起動します。
 6. アプリを起動して右下の `設定` を押します。
-7. `セットアップ` タブで `VOICEVOX を起動` を押します。
+7. ふつうは自動で `VOICEVOX` を見つけて起動します。うまくいかないときだけ `VOICEVOX を起動` を押します。
 8. Discord の入力デバイスを `CABLE Output` にします。
 9. `音声設定` タブで再生先を `CABLE Input` にして保存します。
 10. メイン画面に戻って文字を入れ、`送信` を押します。

@@ -56,7 +56,9 @@ public sealed class MainForm : Form
 
         _settings = await _settingsStore.LoadAsync();
         _engineHttpClient.BaseAddress = new Uri($"{_settings.EngineBaseUrl.TrimEnd('/')}/");
-        _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+        _statusLabel.Text = "VOICEVOX を確認しています。";
+
+        await TryAutoStartInstalledEngineAsync();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -160,11 +162,7 @@ public sealed class MainForm : Form
 
         try
         {
-            var client = CreateApiClient();
-            if (!await client.IsEngineAvailableAsync())
-            {
-                throw new InvalidOperationException("VOICEVOX ENGINE が起動していません。設定からセットアップしてください。");
-            }
+            var client = await EnsureEngineReadyAsync();
 
             var speakerId = await ResolveSpeakerIdAsync(client);
             var outputDevice = FindPreferredOutputDevice();
@@ -259,6 +257,86 @@ public sealed class MainForm : Form
     private VoicevoxApiClient CreateApiClient()
     {
         return new VoicevoxApiClient(_engineHttpClient);
+    }
+
+    private async Task<VoicevoxApiClient> EnsureEngineReadyAsync()
+    {
+        var client = CreateApiClient();
+        if (await client.IsEngineAvailableAsync())
+        {
+            return client;
+        }
+
+        var runExecutablePath = FindInstalledRunExecutablePath();
+        if (runExecutablePath is null)
+        {
+            throw new InvalidOperationException("VOICEVOX ENGINE が見つかりません。setup か設定画面からセットアップしてください。");
+        }
+
+        _statusLabel.Text = "VOICEVOX を起動しています。";
+        var startedNow = await _processManager.StartAsync(
+            runExecutablePath,
+            _settings.EngineBaseUrl,
+            CreateApiClient);
+
+        await RememberInstalledEngineAsync(runExecutablePath);
+        _statusLabel.Text = startedNow
+            ? "VOICEVOX を起動しました。"
+            : "VOICEVOX はすでに起動しています。";
+
+        return CreateApiClient();
+    }
+
+    private async Task TryAutoStartInstalledEngineAsync()
+    {
+        try
+        {
+            var client = await EnsureEngineReadyAsync();
+            if (await client.IsEngineAvailableAsync())
+            {
+                _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+            }
+        }
+        catch
+        {
+            _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+        }
+    }
+
+    private string? FindInstalledRunExecutablePath()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.InstalledEnginePath) && Directory.Exists(_settings.InstalledEnginePath))
+        {
+            var configuredPath = Directory
+                .EnumerateFiles(_settings.InstalledEnginePath, "run.exe", SearchOption.AllDirectories)
+                .FirstOrDefault();
+
+            if (configuredPath is not null)
+            {
+                return configuredPath;
+            }
+        }
+
+        return Directory.Exists(_paths.EngineDirectory)
+            ? Directory.EnumerateFiles(_paths.EngineDirectory, "run.exe", SearchOption.AllDirectories).FirstOrDefault()
+            : null;
+    }
+
+    private async Task RememberInstalledEngineAsync(string runExecutablePath)
+    {
+        var engineDirectory = Path.GetDirectoryName(runExecutablePath);
+        if (string.IsNullOrWhiteSpace(engineDirectory))
+        {
+            return;
+        }
+
+        if (string.Equals(_settings.InstalledEnginePath, engineDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _settings.InstalledEnginePath = engineDirectory;
+        await _settingsStore.SaveAsync(_settings);
     }
 
     private sealed record AudioDeviceItem(int DeviceNumber, string Name);
