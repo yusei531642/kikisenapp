@@ -13,8 +13,10 @@ public sealed class SettingsForm : Form
     private readonly HttpClient _engineHttpClient;
     private readonly VbCableInstaller _vbCableInstaller;
     private readonly VoicevoxEngineProcessManager _processManager;
+    private readonly WhisperController _whisperController;
 
     private List<SpeakerItem> _speakerItems = [];
+    private List<WhisperModelItem> _whisperModelItems = [];
 
     private readonly ComboBox _speakerComboBox = new();
     private readonly ComboBox _outputDeviceComboBox = new();
@@ -32,6 +34,17 @@ public sealed class SettingsForm : Form
     private readonly Button _startVoicevoxButton = new();
     private readonly Button _installVbCableButton = new();
     private readonly Button _openVbCableButton = new();
+    private readonly ComboBox _whisperModelComboBox = new();
+    private readonly ComboBox _whisperInputDeviceComboBox = new();
+    private readonly Label _whisperModelDescriptionLabel = new();
+    private readonly Label _whisperStatusLabel = new();
+    private readonly Button _reloadWhisperDevicesButton = new();
+    private readonly Button _saveWhisperSettingsButton = new();
+    private readonly Button _downloadWhisperModelButton = new();
+    private readonly Button _toggleWhisperButton = new();
+    private readonly NumericUpDown _whisperSegmentUpDown = new();
+    private readonly NumericUpDown _whisperFlushUpDown = new();
+    private readonly NumericUpDown _whisperSilenceUpDown = new();
     private readonly TextBox _guideTextBox = new();
 
     public SettingsForm(
@@ -40,7 +53,8 @@ public sealed class SettingsForm : Form
         AppSettings settings,
         HttpClient engineHttpClient,
         VbCableInstaller vbCableInstaller,
-        VoicevoxEngineProcessManager processManager)
+        VoicevoxEngineProcessManager processManager,
+        WhisperController whisperController)
     {
         _paths = paths;
         _settingsStore = settingsStore;
@@ -48,12 +62,13 @@ public sealed class SettingsForm : Form
         _engineHttpClient = engineHttpClient;
         _vbCableInstaller = vbCableInstaller;
         _processManager = processManager;
+        _whisperController = whisperController;
 
         Text = "設定";
         Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         StartPosition = FormStartPosition.CenterParent;
-        Size = new Size(760, 540);
-        MinimumSize = new Size(620, 420);
+        Size = new Size(760, 560);
+        MinimumSize = new Size(640, 460);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         MinimizeBox = false;
@@ -66,11 +81,25 @@ public sealed class SettingsForm : Form
     {
         base.OnLoad(e);
 
+        _whisperController.StatusChanged += OnWhisperStatusChanged;
+        _whisperController.RunningStateChanged += OnWhisperRunningStateChanged;
+
         ApplySettingsToUi();
+        ApplyWhisperSettingsToUi();
         ReloadAudioDevices();
+        ReloadWhisperInputDevices();
+        LoadWhisperModels();
+        UpdateWhisperUiState();
         await TryAutoStartVoicevoxAsync();
         await LoadSpeakersAsync();
         UpdateSetupGuide();
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _whisperController.StatusChanged -= OnWhisperStatusChanged;
+        _whisperController.RunningStateChanged -= OnWhisperRunningStateChanged;
+        base.OnFormClosed(e);
     }
 
     private void BuildUi()
@@ -83,6 +112,7 @@ public sealed class SettingsForm : Form
 
         tabs.TabPages.Add(BuildVoiceTab());
         tabs.TabPages.Add(BuildSetupTab());
+        tabs.TabPages.Add(BuildWhisperTab());
         tabs.TabPages.Add(BuildGuideTab());
 
         Controls.Add(tabs);
@@ -235,6 +265,96 @@ public sealed class SettingsForm : Form
         return page;
     }
 
+    private TabPage BuildWhisperTab()
+    {
+        var page = new TabPage("Whisper")
+        {
+            Padding = new Padding(4)
+        };
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 8,
+            Padding = new Padding(12)
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        _whisperModelComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _whisperModelComboBox.Dock = DockStyle.Fill;
+        _whisperModelComboBox.SelectedIndexChanged += (_, _) => UpdateSelectedWhisperModelDescription();
+
+        _whisperModelDescriptionLabel.Dock = DockStyle.Fill;
+        _whisperModelDescriptionLabel.AutoEllipsis = true;
+        _whisperModelDescriptionLabel.Text = "モデルを選ぶと重さと説明が見えます。";
+
+        _whisperInputDeviceComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _whisperInputDeviceComboBox.Dock = DockStyle.Fill;
+
+        _reloadWhisperDevicesButton.Text = "再読込";
+        _reloadWhisperDevicesButton.AutoSize = true;
+        _reloadWhisperDevicesButton.Click += (_, _) => ReloadWhisperInputDevices();
+
+        _downloadWhisperModelButton.Text = "モデルをダウンロード";
+        _downloadWhisperModelButton.AutoSize = true;
+        _downloadWhisperModelButton.Click += async (_, _) => await DownloadWhisperModelAsync();
+
+        _toggleWhisperButton.Text = "Whisper を開始";
+        _toggleWhisperButton.AutoSize = true;
+        _toggleWhisperButton.Click += async (_, _) => await ToggleWhisperAsync();
+
+        _saveWhisperSettingsButton.Text = "Whisper 設定を保存";
+        _saveWhisperSettingsButton.AutoSize = true;
+        _saveWhisperSettingsButton.Click += async (_, _) => await SaveWhisperSettingsFromUiAsync("Whisper の設定を保存しました。");
+
+        _whisperStatusLabel.Dock = DockStyle.Fill;
+        _whisperStatusLabel.AutoEllipsis = true;
+        _whisperStatusLabel.Text = "モデルを選んでダウンロードしたあと、開始を押すと聞き取りできます。";
+
+        ConfigureWholeNumber(_whisperSegmentUpDown, 1000, 8000, 2200, 100);
+        ConfigureWholeNumber(_whisperFlushUpDown, 1000, 8000, 1800, 100);
+        ConfigureFraction(_whisperSilenceUpDown, 0.001m, 0.100m, 0.015m, 0.001m, 3);
+
+        table.Controls.Add(CreateLabel("Whisper モデル"), 0, 0);
+        table.Controls.Add(_whisperModelComboBox, 1, 0);
+        table.Controls.Add(CreateLabel("モデルの説明"), 0, 1);
+        table.Controls.Add(_whisperModelDescriptionLabel, 1, 1);
+        table.Controls.Add(CreateLabel("聞き取るデバイス"), 0, 2);
+        table.Controls.Add(CreateRowPanel(_whisperInputDeviceComboBox, _reloadWhisperDevicesButton), 1, 2);
+        table.Controls.Add(CreateLabel("区切り時間"), 0, 3);
+        table.Controls.Add(CreateWhisperSegmentPanel(), 1, 3);
+        table.Controls.Add(CreateLabel("無音の扱い"), 0, 4);
+        table.Controls.Add(CreateWhisperSilencePanel(), 1, 4);
+
+        var actionPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+        actionPanel.Controls.Add(_downloadWhisperModelButton);
+        actionPanel.Controls.Add(_toggleWhisperButton);
+        actionPanel.Controls.Add(_saveWhisperSettingsButton);
+
+        table.Controls.Add(actionPanel, 0, 5);
+        table.SetColumnSpan(actionPanel, 2);
+        table.Controls.Add(_whisperStatusLabel, 0, 6);
+        table.SetColumnSpan(_whisperStatusLabel, 2);
+
+        page.Controls.Add(table);
+        return page;
+    }
+
     private TabPage BuildGuideTab()
     {
         var page = new TabPage("使い方")
@@ -306,6 +426,47 @@ public sealed class SettingsForm : Form
         }
     }
 
+    private void ReloadWhisperInputDevices()
+    {
+        _whisperInputDeviceComboBox.Items.Clear();
+
+        var devices = _whisperController
+            .GetInputDevices()
+            .Select(x => new WhisperInputDeviceItem(x.DeviceNumber, x.Name))
+            .ToList();
+
+        _whisperInputDeviceComboBox.Items.AddRange(devices.Cast<object>().ToArray());
+
+        var selected = devices.FirstOrDefault(x => string.Equals(x.Name, _settings.Whisper.SelectedInputDeviceName, StringComparison.OrdinalIgnoreCase))
+            ?? devices.FirstOrDefault();
+
+        if (selected is not null)
+        {
+            _whisperInputDeviceComboBox.SelectedItem = selected;
+        }
+    }
+
+    private void LoadWhisperModels()
+    {
+        _whisperModelItems = _whisperController
+            .GetModels()
+            .Select(x => new WhisperModelItem(x))
+            .ToList();
+
+        _whisperModelComboBox.Items.Clear();
+        _whisperModelComboBox.Items.AddRange(_whisperModelItems.Cast<object>().ToArray());
+
+        var selected = _whisperModelItems.FirstOrDefault(x => string.Equals(x.Definition.Id, _settings.Whisper.SelectedModelId, StringComparison.OrdinalIgnoreCase))
+            ?? _whisperModelItems.FirstOrDefault();
+
+        if (selected is not null)
+        {
+            _whisperModelComboBox.SelectedItem = selected;
+        }
+
+        UpdateSelectedWhisperModelDescription();
+    }
+
     private async Task SaveSettingsFromUiAsync(string? successMessage)
     {
         _settings.SelectedSpeakerId = (_speakerComboBox.SelectedItem as SpeakerItem)?.StyleId ?? _settings.SelectedSpeakerId;
@@ -321,6 +482,23 @@ public sealed class SettingsForm : Form
         if (!string.IsNullOrWhiteSpace(successMessage))
         {
             _voiceStatusLabel.Text = successMessage;
+        }
+    }
+
+    private async Task SaveWhisperSettingsFromUiAsync(string? successMessage)
+    {
+        _settings.Whisper.SelectedModelId = (_whisperModelComboBox.SelectedItem as WhisperModelItem)?.Definition.Id ?? _settings.Whisper.SelectedModelId;
+        _settings.Whisper.SelectedInputDeviceName = (_whisperInputDeviceComboBox.SelectedItem as WhisperInputDeviceItem)?.Name;
+        _settings.Whisper.SegmentDurationMilliseconds = (int)_whisperSegmentUpDown.Value;
+        _settings.Whisper.FlushAfterSilenceMilliseconds = (int)_whisperFlushUpDown.Value;
+        _settings.Whisper.SilenceThreshold = (float)_whisperSilenceUpDown.Value;
+
+        await _settingsStore.SaveAsync(_settings);
+        UpdateSelectedWhisperModelDescription();
+
+        if (!string.IsNullOrWhiteSpace(successMessage))
+        {
+            _whisperStatusLabel.Text = successMessage;
         }
     }
 
@@ -410,6 +588,66 @@ public sealed class SettingsForm : Form
         }
     }
 
+    private async Task DownloadWhisperModelAsync()
+    {
+        var model = (_whisperModelComboBox.SelectedItem as WhisperModelItem)?.Definition;
+        if (model is null)
+        {
+            MessageBox.Show(this, "Whisper モデルを選んでください。", "Whisper", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        ToggleWhisperButtons(false);
+
+        try
+        {
+            await SaveWhisperSettingsFromUiAsync(null);
+            var progress = new Progress<SetupProgress>(info => _whisperStatusLabel.Text = info.Message);
+            await _whisperController.DownloadModelAsync(model.Id, progress);
+            LoadWhisperModels();
+            UpdateSelectedWhisperModelDescription();
+        }
+        catch (Exception ex)
+        {
+            _whisperStatusLabel.Text = "Whisper モデルの準備に失敗しました。";
+            MessageBox.Show(this, ex.Message, "Whisper ダウンロード失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            ToggleWhisperButtons(true);
+            UpdateWhisperUiState();
+        }
+    }
+
+    private async Task ToggleWhisperAsync()
+    {
+        ToggleWhisperButtons(false);
+
+        try
+        {
+            await SaveWhisperSettingsFromUiAsync(null);
+
+            if (_whisperController.IsRunning)
+            {
+                await _whisperController.StopAsync();
+            }
+            else
+            {
+                await _whisperController.StartAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _whisperStatusLabel.Text = "Whisper の開始または停止に失敗しました。";
+            MessageBox.Show(this, ex.Message, "Whisper エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            ToggleWhisperButtons(true);
+            UpdateWhisperUiState();
+        }
+    }
+
     private void ApplySettingsToUi()
     {
         _speedScaleUpDown.Value = _settings.VoiceTuning.SpeedScale;
@@ -417,6 +655,16 @@ public sealed class SettingsForm : Form
         _intonationScaleUpDown.Value = _settings.VoiceTuning.IntonationScale;
         _volumeScaleUpDown.Value = _settings.VoiceTuning.VolumeScale;
         _normalizeTextCheckBox.Checked = _settings.VoiceTuning.NormalizeText;
+    }
+
+    private void ApplyWhisperSettingsToUi()
+    {
+        _whisperSegmentUpDown.Value = Math.Clamp(_settings.Whisper.SegmentDurationMilliseconds, (int)_whisperSegmentUpDown.Minimum, (int)_whisperSegmentUpDown.Maximum);
+        _whisperFlushUpDown.Value = Math.Clamp(_settings.Whisper.FlushAfterSilenceMilliseconds, (int)_whisperFlushUpDown.Minimum, (int)_whisperFlushUpDown.Maximum);
+
+        var threshold = (decimal)_settings.Whisper.SilenceThreshold;
+        threshold = Math.Clamp(threshold, _whisperSilenceUpDown.Minimum, _whisperSilenceUpDown.Maximum);
+        _whisperSilenceUpDown.Value = threshold;
     }
 
     private string? FindRunExecutablePath()
@@ -444,6 +692,10 @@ public sealed class SettingsForm : Form
             ? "1. まだ VOICEVOX ENGINE が見つかっていません。まずは setup.exe から入れてください。"
             : "1. VOICEVOX ENGINE は導入済みです。必要ならセットアップタブから起動してください。";
 
+        var whisperState = _whisperController.IsModelInstalled(_settings.Whisper.SelectedModelId)
+            ? "Whisper モデルは準備済みです。Whisper タブで開始すると聞き取り後に自動で読み上げます。"
+            : "Whisper タブでモデルを選び、重さを見てからダウンロードしてください。";
+
         _guideTextBox.Text = string.Join(
             Environment.NewLine + Environment.NewLine,
             [
@@ -453,8 +705,24 @@ public sealed class SettingsForm : Form
                 "3. 必要なら Windows を再起動します。",
                 "4. Discord の入力デバイスを `CABLE Output (VB-Audio Virtual Cable)` にします。",
                 "5. このソフトの再生先を `CABLE Input (VB-Audio Virtual Cable)` にします。",
-                "6. メイン画面で文章を入れて `送信` を押すと読み上げます。"
+                "6. Whisper タブで入力デバイスを選び、必要なモデルをダウンロードします。",
+                "7. `Whisper を開始` を押すと聞き取りを始め、文の終わりごとに自動で読み上げます。",
+                $"8. {whisperState}"
             ]);
+    }
+
+    private void UpdateSelectedWhisperModelDescription()
+    {
+        var model = (_whisperModelComboBox.SelectedItem as WhisperModelItem)?.Definition;
+        if (model is null)
+        {
+            _whisperModelDescriptionLabel.Text = "モデルを選んでください。";
+            return;
+        }
+
+        var installed = _whisperController.IsModelInstalled(model.Id) ? "ダウンロード済み" : "未ダウンロード";
+        _whisperModelDescriptionLabel.Text = $"{model.DisplayName} / {model.SizeLabel} / {installed} / {model.Description}";
+        UpdateSetupGuide();
     }
 
     private void ToggleSetupButtons(bool enabled)
@@ -462,6 +730,21 @@ public sealed class SettingsForm : Form
         _startVoicevoxButton.Enabled = enabled;
         _installVbCableButton.Enabled = enabled;
         _openVbCableButton.Enabled = enabled;
+    }
+
+    private void ToggleWhisperButtons(bool enabled)
+    {
+        _downloadWhisperModelButton.Enabled = enabled;
+        _toggleWhisperButton.Enabled = enabled;
+        _saveWhisperSettingsButton.Enabled = enabled;
+        _reloadWhisperDevicesButton.Enabled = enabled;
+    }
+
+    private void UpdateWhisperUiState()
+    {
+        _toggleWhisperButton.Text = _whisperController.IsRunning
+            ? "Whisper を停止"
+            : "Whisper を開始";
     }
 
     private void UpdateProgressBar(long? receivedBytes, long? totalBytes)
@@ -539,6 +822,43 @@ public sealed class SettingsForm : Form
         }
     }
 
+    private void OnWhisperStatusChanged(string message)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => OnWhisperStatusChanged(message));
+            return;
+        }
+
+        _whisperStatusLabel.Text = message;
+        UpdateSetupGuide();
+    }
+
+    private void OnWhisperRunningStateChanged(bool isRunning)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => OnWhisperRunningStateChanged(isRunning));
+            return;
+        }
+
+        _whisperStatusLabel.Text = isRunning
+            ? "Whisper が動いています。文末ごとに自動で読み上げます。"
+            : "Whisper は停止中です。";
+        UpdateWhisperUiState();
+        UpdateSetupGuide();
+    }
+
     private static void ConfigureNumeric(NumericUpDown numericUpDown, decimal minimum, decimal maximum, decimal value, decimal increment)
     {
         numericUpDown.Minimum = minimum;
@@ -546,6 +866,28 @@ public sealed class SettingsForm : Form
         numericUpDown.Value = value;
         numericUpDown.Increment = increment;
         numericUpDown.DecimalPlaces = 2;
+        numericUpDown.Dock = DockStyle.Left;
+        numericUpDown.Width = 100;
+    }
+
+    private static void ConfigureWholeNumber(NumericUpDown numericUpDown, int minimum, int maximum, int value, int increment)
+    {
+        numericUpDown.Minimum = minimum;
+        numericUpDown.Maximum = maximum;
+        numericUpDown.Value = value;
+        numericUpDown.Increment = increment;
+        numericUpDown.DecimalPlaces = 0;
+        numericUpDown.Dock = DockStyle.Left;
+        numericUpDown.Width = 100;
+    }
+
+    private static void ConfigureFraction(NumericUpDown numericUpDown, decimal minimum, decimal maximum, decimal value, decimal increment, int decimalPlaces)
+    {
+        numericUpDown.Minimum = minimum;
+        numericUpDown.Maximum = maximum;
+        numericUpDown.Value = value;
+        numericUpDown.Increment = increment;
+        numericUpDown.DecimalPlaces = decimalPlaces;
         numericUpDown.Dock = DockStyle.Left;
         numericUpDown.Width = 100;
     }
@@ -621,6 +963,40 @@ public sealed class SettingsForm : Form
         return panel;
     }
 
+    private Control CreateWhisperSegmentPanel()
+    {
+        var panel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        panel.Controls.Add(new Label { Text = "何ミリ秒ごとに区切るか", AutoSize = true, Padding = new Padding(0, 8, 0, 0) });
+        panel.Controls.Add(_whisperSegmentUpDown);
+        panel.Controls.Add(new Label { Text = "ms", AutoSize = true, Padding = new Padding(4, 8, 0, 0) });
+
+        return panel;
+    }
+
+    private Control CreateWhisperSilencePanel()
+    {
+        var panel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        panel.Controls.Add(new Label { Text = "無音とみなす大きさ", AutoSize = true, Padding = new Padding(0, 8, 0, 0) });
+        panel.Controls.Add(_whisperSilenceUpDown);
+        panel.Controls.Add(new Label { Text = "  無音が続いたら読み上げるまで", AutoSize = true, Padding = new Padding(12, 8, 0, 0) });
+        panel.Controls.Add(_whisperFlushUpDown);
+        panel.Controls.Add(new Label { Text = "ms", AutoSize = true, Padding = new Padding(4, 8, 0, 0) });
+
+        return panel;
+    }
+
     private static void OpenUrl(string url)
     {
         Process.Start(new ProcessStartInfo
@@ -647,5 +1023,15 @@ public sealed class SettingsForm : Form
     private sealed record AudioDeviceItem(int DeviceNumber, string Name)
     {
         public override string ToString() => Name;
+    }
+
+    private sealed record WhisperInputDeviceItem(int DeviceNumber, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
+    private sealed record WhisperModelItem(WhisperModelDefinition Definition)
+    {
+        public override string ToString() => $"{Definition.DisplayName} / {Definition.SizeLabel}";
     }
 }
