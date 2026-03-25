@@ -5,6 +5,7 @@ obj/
 .tools/
 artifacts/
 publish/
+dist/
 *.user
 *.suo
 *.cache

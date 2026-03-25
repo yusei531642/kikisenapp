@@ -47,6 +47,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\publish.ps1
 ```
 
+`setup.exe` 形式のインストーラーを作りたい場合:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
+```
+
+作成先:
+
+- `dist\KikisenApp-Setup.exe`
+
 この `publish` では、このPCの現在ユーザーだけが信頼するローカル証明書を作って EXE に署名します。
 そのため、このPC上では `不明な発行元` の警告を減らしやすくなります。
 
