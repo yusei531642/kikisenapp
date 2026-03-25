@@ -1,6 +1,15 @@
 # KikisenApp
 
 Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows 向け C# アプリです。
+文字を入力して `送信` するだけで、VOICEVOX の音声を `VB-CABLE` 経由で Discord に流せます。
+
+## 特徴
+
+- メイン画面は `入力` と `送信` だけのシンプル構成
+- 話者、再生先、音量などの細かい設定は別ウィンドウに分離
+- `VOICEVOX ENGINE` の GPU 版を自動セットアップ
+- `VB-CABLE Virtual Audio Device` を公式サイトから自動取得してセットアップ起動
+- `setup.exe` 形式のインストーラーを作成可能
 
 ## できること
 
@@ -11,12 +20,37 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 - Discord で使うための手順をアプリ内で確認
 - メイン画面は「入力」と「送信」だけにして、細かい設定は `設定` ウィンドウに分離
 
+## 動作環境
+
+- Windows 11 / Windows 10 x64
+- NVIDIA GPU があれば `VOICEVOX ENGINE NVIDIA版` を優先
+- NVIDIA GPU がない場合は `DirectML版` を使用
+- 初回セットアップ時はインターネット接続が必要
+- `VB-CABLE` の導入には管理者権限が必要
+
+## ダウンロード
+
+- インストーラー形式: Release の `KikisenApp-Setup.exe`
+- 単体実行ファイル: Release の `KikisenApp.Desktop.exe`
+
 ## 先に知っておいてほしいこと
 
 - VOICEVOX ENGINE はアプリから自動取得できます。
 - このPCでは GPU を見て、`NVIDIA版` を優先し、使えない場合は `DirectML版` に切り替えます。
 - `VB-CABLE` は公式サイトから自動取得してセットアップを起動します。
 - ただし、Windows の仕様で管理者権限の許可と、場合によっては再起動が必要です。
+
+## 使い方
+
+1. アプリを起動します。
+2. 右下の `設定` を押します。
+3. `セットアップ` タブで `VOICEVOX を自動セットアップ` を押します。
+4. `VOICEVOX を起動` を押します。
+5. `VB-CABLE を自動セットアップ` を押して、管理者権限を許可します。
+6. 必要なら Windows を再起動します。
+7. Discord の入力デバイスを `CABLE Output` にします。
+8. `音声設定` タブで再生先を `CABLE Input` にして保存します。
+9. メイン画面に戻って文字を入れ、`送信` を押します。
 
 ## 開発環境の準備
 
@@ -63,19 +97,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
 ただし、外部配布用の正式な安全表示までは保証できません。
 ほかのPCでも警告を減らしたい場合は、商用のコードサイニング証明書が必要です。
 
-## 初回セットアップの流れ
-
-1. メイン画面の `設定` を押します。
-2. `セットアップ` タブで `VOICEVOX を自動セットアップ` を押します。
-3. `VOICEVOX を起動` を押してエンジンを立ち上げます。
-4. `VB-CABLE を自動セットアップ` を押して、管理者権限を許可します。
-5. 必要なら Windows を再起動します。
-6. Discord の入力デバイスを `CABLE Output` にします。
-7. `音声設定` タブで再生先を `CABLE Input` にして保存します。
-8. メイン画面に戻って文字を入れ、`送信` を押します。
-
 ## 主なフォルダ
 
 - `src/KikisenApp.Core`: 設定、VOICEVOX 通信、セットアップ処理
 - `src/KikisenApp.Desktop`: Windows フォームの画面
 - `tests/KikisenApp.Core.Tests`: 文字整形やアセット選択のテスト
+
+## ライセンス
+
+このプロジェクトは [MIT License](./LICENSE) です。
