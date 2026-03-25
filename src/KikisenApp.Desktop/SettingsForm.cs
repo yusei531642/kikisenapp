@@ -54,6 +54,7 @@ public sealed class SettingsForm : Form
         _processManager = processManager;
 
         Text = "設定";
+        Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         StartPosition = FormStartPosition.CenterParent;
         Size = new Size(760, 540);
         MinimumSize = new Size(620, 420);

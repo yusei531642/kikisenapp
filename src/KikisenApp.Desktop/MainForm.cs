@@ -38,6 +38,7 @@ public sealed class MainForm : Form
         _vbCableInstaller = new VbCableInstaller(_setupHttpClient, _paths);
 
         Text = "KikisenApp";
+        Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(560, 300);
         MinimumSize = new Size(420, 220);
