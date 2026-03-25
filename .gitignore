@@ -6,6 +6,8 @@ obj/
 artifacts/
 publish/
 dist/
+installer/downloads/
+installer/download-files.generated.iss
 *.user
 *.suo
 *.cache

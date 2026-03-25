@@ -14,6 +14,9 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0.0</FileVersion>
+    <ApplicationIcon>..\..\assets\kikisenapp.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

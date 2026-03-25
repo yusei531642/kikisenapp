@@ -5,6 +5,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $dotnetDir = Join-Path $projectRoot ".tools\dotnet"
 $dotnetExe = Join-Path $dotnetDir "dotnet.exe"
 $installScript = Join-Path $projectRoot ".tools\dotnet-install.ps1"
+$iconScript = Join-Path $PSScriptRoot "ensure-app-icon.ps1"
 $publishDir = Join-Path $projectRoot "publish\win-x64"
 
 if (-not (Test-Path $dotnetExe)) {
@@ -14,6 +15,8 @@ if (-not (Test-Path $dotnetExe)) {
 }
 
 New-Item -ItemType Directory -Force $publishDir | Out-Null
+
+& powershell -ExecutionPolicy Bypass -File $iconScript
 
 $env:PATH = "$dotnetDir;$env:PATH"
 & $dotnetExe publish `
