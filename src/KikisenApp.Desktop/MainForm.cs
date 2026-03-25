@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using KikisenApp.Core;
 using NAudio.Wave;
@@ -9,8 +10,9 @@ public sealed class MainForm : Form
     private readonly AppPaths _paths = AppPaths.CreateDefault();
     private readonly AppSettingsStore _settingsStore;
     private readonly HttpClient _engineHttpClient;
-    private readonly HttpClient _githubHttpClient;
-    private readonly VoicevoxEngineInstaller _installer;
+    private readonly HttpClient _setupHttpClient;
+    private readonly VoicevoxEngineInstaller _voicevoxInstaller;
+    private readonly VbCableInstaller _vbCableInstaller;
     private readonly VoicevoxEngineProcessManager _processManager = new();
 
     private AppSettings _settings = new();
@@ -36,6 +38,7 @@ public sealed class MainForm : Form
     private readonly Label _setupStatusLabel = new();
     private readonly Button _installVoicevoxButton = new();
     private readonly Button _startVoicevoxButton = new();
+    private readonly Button _installVbCableButton = new();
     private readonly Button _openVbCableButton = new();
     private readonly Button _reloadDevicesButton = new();
     private readonly TextBox _guideTextBox = new();
@@ -50,8 +53,9 @@ public sealed class MainForm : Form
             BaseAddress = new Uri("http://127.0.0.1:50021/")
         };
 
-        _githubHttpClient = new HttpClient();
-        _installer = new VoicevoxEngineInstaller(_githubHttpClient, _paths);
+        _setupHttpClient = new HttpClient();
+        _voicevoxInstaller = new VoicevoxEngineInstaller(_setupHttpClient, _paths);
+        _vbCableInstaller = new VbCableInstaller(_setupHttpClient, _paths);
 
         Text = "KikisenApp - Discord 読み上げ";
         StartPosition = FormStartPosition.CenterScreen;
@@ -83,7 +87,7 @@ public sealed class MainForm : Form
         StopPlayback();
         _processManager.Stop();
         _engineHttpClient.Dispose();
-        _githubHttpClient.Dispose();
+        _setupHttpClient.Dispose();
         base.OnFormClosing(e);
     }
 
@@ -230,6 +234,10 @@ public sealed class MainForm : Form
         _startVoicevoxButton.AutoSize = true;
         _startVoicevoxButton.Click += async (_, _) => await StartVoicevoxAsync();
 
+        _installVbCableButton.Text = "VB-CABLE を自動セットアップ";
+        _installVbCableButton.AutoSize = true;
+        _installVbCableButton.Click += async (_, _) => await InstallVbCableAsync();
+
         _openVbCableButton.Text = "VB-CABLE 公式ページを開く";
         _openVbCableButton.AutoSize = true;
         _openVbCableButton.Click += (_, _) => OpenUrl(ExternalLinks.VbCablePage);
@@ -238,7 +246,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
-            Text = "VB-CABLE は配布条件の都合で自動同梱していません。公式ページから入れてください。"
+            Text = "VB-CABLE は公式サイトから自動取得してセットアップを起動できます。管理者権限と再起動が必要です。"
         };
 
         _setupLogTextBox.Multiline = true;
@@ -255,6 +263,7 @@ public sealed class MainForm : Form
         };
         buttonPanel.Controls.Add(_installVoicevoxButton);
         buttonPanel.Controls.Add(_startVoicevoxButton);
+        buttonPanel.Controls.Add(_installVbCableButton);
         buttonPanel.Controls.Add(_openVbCableButton);
 
         layout.Controls.Add(_setupStatusLabel, 0, 0);
@@ -297,7 +306,7 @@ public sealed class MainForm : Form
                 AppendSetupLog($"{DateTime.Now:HH:mm:ss} {info.Message}");
             });
 
-            var result = await _installer.EnsureInstalledAsync(progress);
+            var result = await _voicevoxInstaller.EnsureInstalledAsync(progress);
             _settings.InstalledEnginePath = Path.GetDirectoryName(result.RunExecutablePath);
             _settings.InstalledEngineVersion = result.Version;
             await _settingsStore.SaveAsync(_settings);
@@ -312,6 +321,60 @@ public sealed class MainForm : Form
             _setupStatusLabel.Text = "セットアップに失敗しました。";
             AppendSetupLog($"エラー: {ex.Message}");
             MessageBox.Show(this, ex.Message, "セットアップ失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            ToggleSetupButtons(true);
+        }
+    }
+
+    private async Task InstallVbCableAsync()
+    {
+        ToggleSetupButtons(false);
+        AppendSetupLog("VB-CABLE のセットアップを開始します。");
+
+        try
+        {
+            _setupProgressBar.Style = ProgressBarStyle.Marquee;
+            var progress = new Progress<SetupProgress>(info =>
+            {
+                _setupStatusLabel.Text = info.Message;
+                UpdateProgressBar(info.ReceivedBytes, info.TotalBytes);
+                AppendSetupLog($"{DateTime.Now:HH:mm:ss} {info.Message}");
+            });
+
+            var result = await _vbCableInstaller.DownloadAndLaunchInstallerAsync(progress);
+            AppendSetupLog($"VB-CABLE セットアップを起動しました: {result.InstallerPath}");
+            AppendSetupLog($"ダウンロード元: {result.DownloadUrl}");
+
+            ReloadAudioDevices();
+            var cableDevice = SelectCableInputIfAvailable();
+
+            _setupStatusLabel.Text = cableDevice is null
+                ? "VB-CABLE のセットアップを起動しました。完了後は Windows を再起動してください。"
+                : "VB-CABLE を検出しました。必要なら Windows を再起動してから Discord 側も設定してください。";
+
+            MessageBox.Show(
+                this,
+                cableDevice is null
+                    ? "VB-CABLE のセットアップを起動しました。\nインストール完了後は Windows を再起動すると安定します。"
+                    : "VB-CABLE を検出しました。\nこのアプリでは再生先を自動で選びました。Discord の入力デバイスは CABLE Output にしてください。",
+                "VB-CABLE セットアップ",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+
+            UpdateSetupGuide();
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            _setupStatusLabel.Text = "VB-CABLE の管理者権限がキャンセルされました。";
+            AppendSetupLog("VB-CABLE の UAC 承認がキャンセルされました。");
+        }
+        catch (Exception ex)
+        {
+            _setupStatusLabel.Text = "VB-CABLE のセットアップに失敗しました。";
+            AppendSetupLog($"エラー: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "VB-CABLE セットアップ失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -486,6 +549,20 @@ public sealed class MainForm : Form
         }
     }
 
+    private AudioDeviceItem? SelectCableInputIfAvailable()
+    {
+        var cableDevice = _outputDeviceComboBox.Items
+            .Cast<AudioDeviceItem>()
+            .FirstOrDefault(x => x.Name.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase));
+
+        if (cableDevice is not null)
+        {
+            _outputDeviceComboBox.SelectedItem = cableDevice;
+        }
+
+        return cableDevice;
+    }
+
     private void ApplySettingsToUi()
     {
         _speedScaleUpDown.Value = _settings.VoiceTuning.SpeedScale;
@@ -558,10 +635,11 @@ public sealed class MainForm : Form
             [
                 "Discord で使う手順",
                 voicevoxState,
-                "2. VB-CABLE を公式サイトからインストールします。インストール後は Windows の再起動が必要です。",
-                "3. Discord の入力デバイスを `CABLE Output (VB-Audio Virtual Cable)` にします。",
-                "4. このアプリの `しゃべる` タブで再生先デバイスを `CABLE Input (VB-Audio Virtual Cable)` にします。",
-                "5. 文章を入れて `読み上げ` を押すと、Discord 側では仮想マイクとして聞こえます。",
+                "2. セットアップタブの `VB-CABLE を自動セットアップ` を押します。管理者権限の許可が必要です。",
+                "3. VB-CABLE のインストール後は Windows を再起動すると安定します。",
+                "4. Discord の入力デバイスを `CABLE Output (VB-Audio Virtual Cable)` にします。",
+                "5. このアプリの `しゃべる` タブで再生先デバイスを `CABLE Input (VB-Audio Virtual Cable)` にします。",
+                "6. 文章を入れて `読み上げ` を押すと、Discord 側では仮想マイクとして聞こえます。",
                 "聞こえやすくするコツ",
                 "- 音量倍率は 1.35 を初期値にしています。小さければ 1.50 くらいまで上げてください。",
                 "- Discord 側の入力感度が自動だと途切れることがあります。必要なら自動感度を切って少し低めにします。",
@@ -573,6 +651,7 @@ public sealed class MainForm : Form
     {
         _installVoicevoxButton.Enabled = enabled;
         _startVoicevoxButton.Enabled = enabled;
+        _installVbCableButton.Enabled = enabled;
         _openVbCableButton.Enabled = enabled;
     }
 
