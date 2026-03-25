@@ -44,6 +44,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\publish.ps1
 ```
 
+この `publish` では、このPCの現在ユーザーだけが信頼するローカル証明書を作って EXE に署名します。
+そのため、このPC上では `不明な発行元` の警告を減らしやすくなります。
+
+ただし、外部配布用の正式な安全表示までは保証できません。
+ほかのPCでも警告を減らしたい場合は、商用のコードサイニング証明書が必要です。
+
 ## 初回セットアップの流れ
 
 1. アプリの `セットアップ` タブで `VOICEVOX を自動セットアップ` を押します。

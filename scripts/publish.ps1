@@ -24,3 +24,8 @@ $env:PATH = "$dotnetDir;$env:PATH"
     -p:PublishSingleFile=true `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -o $publishDir
+
+$signScript = Join-Path $PSScriptRoot "sign-local-build.ps1"
+$publishedExe = Join-Path $publishDir "KikisenApp.Desktop.exe"
+
+& powershell -ExecutionPolicy Bypass -File $signScript -FilePaths $publishedExe
