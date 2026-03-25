@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+.vscode/
+.tools/
+artifacts/
+publish/
+*.user
+*.suo
+*.cache
+*.tmp
+*.wav
+appsettings.local.json
