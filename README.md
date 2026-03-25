@@ -6,12 +6,13 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 - 文字を入力して VOICEVOX で読み上げ
 - 再生先デバイスを選んで、VB-CABLE などの仮想オーディオへ出力
-- VOICEVOX ENGINE の最新 Windows CPU 版を自動ダウンロード
+- VOICEVOX ENGINE の最新 Windows GPU 版を自動ダウンロード
 - Discord で使うための手順をアプリ内で確認
 
 ## 先に知っておいてほしいこと
 
 - VOICEVOX ENGINE はアプリから自動取得できます。
+- このPCでは GPU を見て、`NVIDIA版` を優先し、使えない場合は `DirectML版` に切り替えます。
 - `VB-CABLE` は配布元のライセンス上、このアプリへ同梱したり自動インストールへ組み込んだりしていません。
 - そのため、仮想オーディオドライバはアプリ内のボタンから公式ページを開いて導入してください。
 

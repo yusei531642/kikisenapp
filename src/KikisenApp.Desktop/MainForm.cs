@@ -290,8 +290,9 @@ public sealed class MainForm : Form
             _settings.InstalledEngineVersion = result.Version;
             await _settingsStore.SaveAsync(_settings);
 
-            _setupStatusLabel.Text = $"VOICEVOX ENGINE {result.Version} の準備ができました。";
-            AppendSetupLog($"VOICEVOX ENGINE を {result.RunExecutablePath} に準備しました。");
+            var variantName = FormatVariantName(result.Variant);
+            _setupStatusLabel.Text = $"VOICEVOX ENGINE {variantName} {result.Version} の準備ができました。";
+            AppendSetupLog($"VOICEVOX ENGINE {variantName} を {result.RunExecutablePath} に準備しました。");
             UpdateSetupGuide();
         }
         catch (Exception ex)
@@ -669,6 +670,15 @@ public sealed class MainForm : Form
             FileName = url,
             UseShellExecute = true
         });
+    }
+
+    private static string FormatVariantName(VoicevoxEngineVariant variant)
+    {
+        return variant switch
+        {
+            VoicevoxEngineVariant.Nvidia => "(NVIDIA GPU版)",
+            _ => "(DirectML GPU版)"
+        };
     }
 
     private sealed record SpeakerItem(int StyleId, string DisplayName)

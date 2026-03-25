@@ -25,29 +25,62 @@ public sealed class GitHubReleaseAsset
 
 public sealed record VoicevoxReleaseAsset(
     string Version,
-    string AssetName,
-    string DownloadUrl,
-    long Size);
+    VoicevoxEngineVariant Variant,
+    string ArchiveBaseName,
+    IReadOnlyList<GitHubReleaseAsset> Parts)
+{
+    public long TotalSize => Parts.Sum(x => x.Size);
+}
 
 public static class VoicevoxReleaseAssetSelector
 {
-    public static VoicevoxReleaseAsset SelectWindowsCpuAsset(GitHubReleaseResponse release)
+    public static VoicevoxReleaseAsset SelectWindowsGpuAsset(
+        GitHubReleaseResponse release,
+        VoicevoxEngineVariant preferredVariant)
     {
         ArgumentNullException.ThrowIfNull(release);
 
-        var asset = release.Assets.FirstOrDefault(x =>
-            x.Name.StartsWith("voicevox_engine-windows-cpu-", StringComparison.OrdinalIgnoreCase) &&
-            x.Name.EndsWith(".7z.001", StringComparison.OrdinalIgnoreCase));
+        var variants = preferredVariant == VoicevoxEngineVariant.Nvidia
+            ? new[] { VoicevoxEngineVariant.Nvidia, VoicevoxEngineVariant.DirectMl }
+            : new[] { VoicevoxEngineVariant.DirectMl, VoicevoxEngineVariant.Nvidia };
 
-        if (asset is null)
+        foreach (var variant in variants)
         {
-            throw new InvalidOperationException("VOICEVOX ENGINE の Windows CPU 版アセットが見つかりませんでした。");
+            var prefix = variant switch
+            {
+                VoicevoxEngineVariant.Nvidia => "voicevox_engine-windows-nvidia-",
+                _ => "voicevox_engine-windows-directml-"
+            };
+
+            var firstPart = release.Assets.FirstOrDefault(x =>
+                x.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                x.Name.EndsWith(".7z.001", StringComparison.OrdinalIgnoreCase));
+
+            if (firstPart is null)
+            {
+                continue;
+            }
+
+            var archiveBaseName = firstPart.Name[..^4];
+            var parts = release.Assets
+                .Where(x =>
+                    x.Name.StartsWith($"{archiveBaseName}.", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(Path.GetExtension(x.Name).TrimStart('.'), out _))
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (parts.Count == 0)
+            {
+                continue;
+            }
+
+            return new VoicevoxReleaseAsset(
+                Version: release.TagName,
+                Variant: variant,
+                ArchiveBaseName: archiveBaseName,
+                Parts: parts);
         }
 
-        return new VoicevoxReleaseAsset(
-            Version: release.TagName,
-            AssetName: asset.Name,
-            DownloadUrl: asset.BrowserDownloadUrl,
-            Size: asset.Size);
+        throw new InvalidOperationException("VOICEVOX ENGINE の Windows GPU 版アセットが見つかりませんでした。");
     }
 }

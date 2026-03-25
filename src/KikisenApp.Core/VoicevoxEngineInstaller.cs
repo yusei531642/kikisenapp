@@ -29,7 +29,8 @@ public sealed class VoicevoxEngineInstaller
         var release = await _httpClient.GetFromJsonAsync<GitHubReleaseResponse>(GitHubLatestReleaseEndpoint, cancellationToken)
             ?? throw new InvalidOperationException("VOICEVOX ENGINE の最新情報を取得できませんでした。");
 
-        return VoicevoxReleaseAssetSelector.SelectWindowsCpuAsset(release);
+        var preferredVariant = VoicevoxEngineVariantDetector.DetectPreferredVariant();
+        return VoicevoxReleaseAssetSelector.SelectWindowsGpuAsset(release, preferredVariant);
     }
 
     public async Task<VoicevoxInstallationResult> EnsureInstalledAsync(
@@ -38,76 +39,87 @@ public sealed class VoicevoxEngineInstaller
     {
         _paths.EnsureDirectories();
         var latestAsset = await GetLatestReleaseAssetAsync(cancellationToken);
-        var installDirectory = Path.Combine(_paths.EngineDirectory, latestAsset.Version);
+        var installDirectory = Path.Combine(
+            _paths.EngineDirectory,
+            $"{latestAsset.Version}-{latestAsset.Variant.ToString().ToLowerInvariant()}");
 
         var existingRunExe = FindRunExecutable(installDirectory);
         if (existingRunExe is not null)
         {
-            progress?.Report(new SetupProgress("install", "VOICEVOX ENGINE はすでに導入されています。"));
-            return new VoicevoxInstallationResult(latestAsset.Version, existingRunExe, false);
+            progress?.Report(new SetupProgress("install", $"VOICEVOX ENGINE {FormatVariantName(latestAsset.Variant)} はすでに導入されています。"));
+            return new VoicevoxInstallationResult(latestAsset.Version, latestAsset.Variant, existingRunExe, false);
         }
 
         Directory.CreateDirectory(installDirectory);
 
-        var archiveName = latestAsset.AssetName.Replace(".001", string.Empty, StringComparison.OrdinalIgnoreCase);
-        var archivePath = Path.Combine(_paths.DownloadsDirectory, archiveName);
+        var archivePaths = latestAsset.Parts
+            .Select(x => Path.Combine(_paths.DownloadsDirectory, x.Name))
+            .ToList();
 
-        progress?.Report(new SetupProgress("download", "VOICEVOX ENGINE をダウンロードしています。", 0, latestAsset.Size));
-        await DownloadFileAsync(latestAsset.DownloadUrl, archivePath, latestAsset.Size, progress, cancellationToken);
+        progress?.Report(new SetupProgress("download", $"VOICEVOX ENGINE {FormatVariantName(latestAsset.Variant)} をダウンロードしています。", 0, latestAsset.TotalSize));
+        await DownloadPartsAsync(latestAsset, archivePaths, progress, cancellationToken);
 
-        progress?.Report(new SetupProgress("extract", "VOICEVOX ENGINE を展開しています。"));
-        ExtractArchive(archivePath, installDirectory);
+        progress?.Report(new SetupProgress("extract", $"VOICEVOX ENGINE {FormatVariantName(latestAsset.Variant)} を展開しています。"));
+        ExtractArchive(archivePaths, installDirectory);
 
         var runExe = FindRunExecutable(installDirectory)
             ?? throw new InvalidOperationException("VOICEVOX ENGINE の run.exe が見つかりませんでした。");
 
-        progress?.Report(new SetupProgress("complete", "VOICEVOX ENGINE のセットアップが完了しました。"));
-        return new VoicevoxInstallationResult(latestAsset.Version, runExe, true);
+        progress?.Report(new SetupProgress("complete", $"VOICEVOX ENGINE {FormatVariantName(latestAsset.Variant)} のセットアップが完了しました。"));
+        return new VoicevoxInstallationResult(latestAsset.Version, latestAsset.Variant, runExe, true);
     }
 
-    private async Task DownloadFileAsync(
-        string url,
-        string destinationPath,
-        long? totalBytes,
+    private async Task DownloadPartsAsync(
+        VoicevoxReleaseAsset asset,
+        IReadOnlyList<string> destinationPaths,
         IProgress<SetupProgress>? progress,
         CancellationToken cancellationToken)
     {
-        if (File.Exists(destinationPath))
-        {
-            var fileInfo = new FileInfo(destinationPath);
-            if (totalBytes.HasValue && fileInfo.Length == totalBytes.Value)
-            {
-                progress?.Report(new SetupProgress("download", "すでにダウンロード済みのファイルを使います。", fileInfo.Length, totalBytes));
-                return;
-            }
-        }
-
-        using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var fileStream = File.Create(destinationPath);
-
-        var buffer = new byte[1024 * 1024];
         long received = 0;
 
-        while (true)
+        for (var index = 0; index < asset.Parts.Count; index++)
         {
-            var read = await responseStream.ReadAsync(buffer, cancellationToken);
-            if (read == 0)
+            var part = asset.Parts[index];
+            var destinationPath = destinationPaths[index];
+
+            if (File.Exists(destinationPath))
             {
-                break;
+                var fileInfo = new FileInfo(destinationPath);
+                if (fileInfo.Length == part.Size)
+                {
+                    received += fileInfo.Length;
+                    progress?.Report(new SetupProgress("download", $"VOICEVOX ENGINE {FormatVariantName(asset.Variant)} をダウンロードしています。", received, asset.TotalSize));
+                    continue;
+                }
             }
 
-            await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            received += read;
-            progress?.Report(new SetupProgress("download", "VOICEVOX ENGINE をダウンロードしています。", received, totalBytes));
+            using var response = await _httpClient.GetAsync(part.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var fileStream = File.Create(destinationPath);
+
+            var buffer = new byte[1024 * 1024];
+
+            while (true)
+            {
+                var read = await responseStream.ReadAsync(buffer, cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                received += read;
+                progress?.Report(new SetupProgress("download", $"VOICEVOX ENGINE {FormatVariantName(asset.Variant)} をダウンロードしています。", received, asset.TotalSize));
+            }
         }
     }
 
-    private static void ExtractArchive(string archivePath, string destinationDirectory)
+    private static void ExtractArchive(IReadOnlyList<string> archivePaths, string destinationDirectory)
     {
-        using var archive = SevenZipArchive.OpenArchive(archivePath, new());
+        var partFiles = archivePaths.Select(path => new FileInfo(path)).ToList();
+        using var archive = SevenZipArchive.OpenArchive(partFiles, new());
 
         foreach (var entry in archive.Entries.Where(x => !x.IsDirectory))
         {
@@ -130,9 +142,19 @@ public sealed class VoicevoxEngineInstaller
             .EnumerateFiles(directory, "run.exe", SearchOption.AllDirectories)
             .FirstOrDefault();
     }
+
+    private static string FormatVariantName(VoicevoxEngineVariant variant)
+    {
+        return variant switch
+        {
+            VoicevoxEngineVariant.Nvidia => "GPU版 (NVIDIA)",
+            _ => "GPU版 (DirectML)"
+        };
+    }
 }
 
 public sealed record VoicevoxInstallationResult(
     string Version,
+    VoicevoxEngineVariant Variant,
     string RunExecutablePath,
     bool InstalledNow);
