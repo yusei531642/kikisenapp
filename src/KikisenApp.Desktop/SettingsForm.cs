@@ -11,7 +11,6 @@ public sealed class SettingsForm : Form
     private readonly AppSettingsStore _settingsStore;
     private readonly AppSettings _settings;
     private readonly HttpClient _engineHttpClient;
-    private readonly VoicevoxEngineInstaller _voicevoxInstaller;
     private readonly VbCableInstaller _vbCableInstaller;
     private readonly VoicevoxEngineProcessManager _processManager;
 
@@ -30,7 +29,6 @@ public sealed class SettingsForm : Form
     private readonly TextBox _setupLogTextBox = new();
     private readonly ProgressBar _setupProgressBar = new();
     private readonly Label _setupStatusLabel = new();
-    private readonly Button _installVoicevoxButton = new();
     private readonly Button _startVoicevoxButton = new();
     private readonly Button _installVbCableButton = new();
     private readonly Button _openVbCableButton = new();
@@ -41,7 +39,6 @@ public sealed class SettingsForm : Form
         AppSettingsStore settingsStore,
         AppSettings settings,
         HttpClient engineHttpClient,
-        VoicevoxEngineInstaller voicevoxInstaller,
         VbCableInstaller vbCableInstaller,
         VoicevoxEngineProcessManager processManager)
     {
@@ -49,7 +46,6 @@ public sealed class SettingsForm : Form
         _settingsStore = settingsStore;
         _settings = settings;
         _engineHttpClient = engineHttpClient;
-        _voicevoxInstaller = voicevoxInstaller;
         _vbCableInstaller = vbCableInstaller;
         _processManager = processManager;
 
@@ -194,10 +190,6 @@ public sealed class SettingsForm : Form
 
         _setupProgressBar.Dock = DockStyle.Fill;
 
-        _installVoicevoxButton.Text = "VOICEVOX を自動セットアップ";
-        _installVoicevoxButton.AutoSize = true;
-        _installVoicevoxButton.Click += async (_, _) => await InstallVoicevoxAsync();
-
         _startVoicevoxButton.Text = "VOICEVOX を起動";
         _startVoicevoxButton.AutoSize = true;
         _startVoicevoxButton.Click += async (_, _) => await StartVoicevoxAsync();
@@ -229,7 +221,6 @@ public sealed class SettingsForm : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = true
         };
-        buttonPanel.Controls.Add(_installVoicevoxButton);
         buttonPanel.Controls.Add(_startVoicevoxButton);
         buttonPanel.Controls.Add(_installVbCableButton);
         buttonPanel.Controls.Add(_openVbCableButton);
@@ -330,52 +321,6 @@ public sealed class SettingsForm : Form
         if (!string.IsNullOrWhiteSpace(successMessage))
         {
             _voiceStatusLabel.Text = successMessage;
-        }
-    }
-
-    private async Task InstallVoicevoxAsync()
-    {
-        ToggleSetupButtons(false);
-        AppendSetupLog("VOICEVOX ENGINE のセットアップを開始します。");
-
-        try
-        {
-            _setupProgressBar.Style = ProgressBarStyle.Marquee;
-            var progress = new Progress<SetupProgress>(info =>
-            {
-                _setupStatusLabel.Text = info.Message;
-                UpdateProgressBar(info.ReceivedBytes, info.TotalBytes);
-                AppendSetupLog($"{DateTime.Now:HH:mm:ss} {info.Message}");
-            });
-
-            var result = await _voicevoxInstaller.EnsureInstalledAsync(progress);
-            _settings.InstalledEnginePath = Path.GetDirectoryName(result.RunExecutablePath);
-            _settings.InstalledEngineVersion = result.Version;
-            await _settingsStore.SaveAsync(_settings);
-
-            var startedNow = await _processManager.StartAsync(
-                result.RunExecutablePath,
-                _settings.EngineBaseUrl,
-                CreateApiClient);
-
-            var variantName = FormatVariantName(result.Variant);
-            _setupStatusLabel.Text = startedNow
-                ? $"VOICEVOX ENGINE {variantName} {result.Version} を起動しました。"
-                : $"VOICEVOX ENGINE {variantName} {result.Version} はすでに起動しています。";
-            AppendSetupLog($"VOICEVOX ENGINE {variantName} を {result.RunExecutablePath} に準備しました。");
-            AppendSetupLog(_setupStatusLabel.Text);
-            await LoadSpeakersAsync();
-            UpdateSetupGuide();
-        }
-        catch (Exception ex)
-        {
-            _setupStatusLabel.Text = "セットアップに失敗しました。";
-            AppendSetupLog($"エラー: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "セットアップ失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally
-        {
-            ToggleSetupButtons(true);
         }
     }
 
@@ -496,7 +441,7 @@ public sealed class SettingsForm : Form
     private void UpdateSetupGuide()
     {
         var voicevoxState = FindRunExecutablePath() is null
-            ? "1. まだ VOICEVOX ENGINE は未導入です。セットアップタブから自動セットアップしてください。"
+            ? "1. まだ VOICEVOX ENGINE が見つかっていません。まずは setup.exe から入れてください。"
             : "1. VOICEVOX ENGINE は導入済みです。必要ならセットアップタブから起動してください。";
 
         _guideTextBox.Text = string.Join(
@@ -514,7 +459,6 @@ public sealed class SettingsForm : Form
 
     private void ToggleSetupButtons(bool enabled)
     {
-        _installVoicevoxButton.Enabled = enabled;
         _startVoicevoxButton.Enabled = enabled;
         _installVbCableButton.Enabled = enabled;
         _openVbCableButton.Enabled = enabled;

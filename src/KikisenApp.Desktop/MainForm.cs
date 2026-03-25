@@ -9,7 +9,6 @@ public sealed class MainForm : Form
     private readonly AppSettingsStore _settingsStore;
     private readonly HttpClient _engineHttpClient;
     private readonly HttpClient _setupHttpClient;
-    private readonly VoicevoxEngineInstaller _voicevoxInstaller;
     private readonly VbCableInstaller _vbCableInstaller;
     private readonly VoicevoxEngineProcessManager _processManager = new();
 
@@ -34,7 +33,6 @@ public sealed class MainForm : Form
         };
 
         _setupHttpClient = new HttpClient();
-        _voicevoxInstaller = new VoicevoxEngineInstaller(_setupHttpClient, _paths);
         _vbCableInstaller = new VbCableInstaller(_setupHttpClient, _paths);
 
         Text = "KikisenApp";
@@ -137,7 +135,6 @@ public sealed class MainForm : Form
             _settingsStore,
             _settings,
             _engineHttpClient,
-            _voicevoxInstaller,
             _vbCableInstaller,
             _processManager);
 

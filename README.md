@@ -7,7 +7,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 - メイン画面は `入力` と `送信` だけのシンプル構成
 - 話者、再生先、音量などの細かい設定は別ウィンドウに分離
-- `VOICEVOX ENGINE` の GPU 版を自動セットアップ
+- `VOICEVOX ENGINE` は `setup.exe` 側で導入
 - `VB-CABLE Virtual Audio Device` をインストーラーに同封
 - `setup.exe` 形式のインストーラーを作成可能
 - `kikisenapp.png` をアプリアイコンとインストーラーアイコンに使用
@@ -37,7 +37,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 ## 先に知っておいてほしいこと
 
-- VOICEVOX ENGINE はアプリから自動取得できます。
+- VOICEVOX ENGINE は `setup.exe` 側で入れる前提です。
 - このPCでは GPU を見て、`NVIDIA版` を優先し、使えない場合は `DirectML版` に切り替えます。
 - `setup.exe` では `VB-CABLE` を同封し、`VOICEVOX ENGINE` はセットアップ中に外部ダウンロードします。
 - ただし、Windows の仕様で管理者権限の許可と、場合によっては再起動が必要です。
