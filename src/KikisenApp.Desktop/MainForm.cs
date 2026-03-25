@@ -9,6 +9,7 @@ public sealed class MainForm : Form
     private readonly AppSettingsStore _settingsStore;
     private readonly HttpClient _engineHttpClient;
     private readonly HttpClient _setupHttpClient;
+    private readonly VoicevoxEngineInstaller _voicevoxInstaller;
     private readonly VbCableInstaller _vbCableInstaller;
     private readonly VoicevoxEngineProcessManager _processManager = new();
 
@@ -33,6 +34,7 @@ public sealed class MainForm : Form
         };
 
         _setupHttpClient = new HttpClient();
+        _voicevoxInstaller = new VoicevoxEngineInstaller(_setupHttpClient, _paths);
         _vbCableInstaller = new VbCableInstaller(_setupHttpClient, _paths);
 
         Text = "KikisenApp";
@@ -57,6 +59,7 @@ public sealed class MainForm : Form
         _statusLabel.Text = "VOICEVOX を確認しています。";
 
         await TryAutoStartInstalledEngineAsync();
+        _ = CheckForVoicevoxUpdatesAsync();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -276,7 +279,7 @@ public sealed class MainForm : Form
             _settings.EngineBaseUrl,
             CreateApiClient);
 
-        await RememberInstalledEngineAsync(runExecutablePath);
+        await RememberInstalledEngineAsync(runExecutablePath, _settings.InstalledEngineVersion);
         _statusLabel.Text = startedNow
             ? "VOICEVOX を起動しました。"
             : "VOICEVOX はすでに起動しています。";
@@ -319,7 +322,40 @@ public sealed class MainForm : Form
             : null;
     }
 
-    private async Task RememberInstalledEngineAsync(string runExecutablePath)
+    private async Task CheckForVoicevoxUpdatesAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+
+            var update = await _voicevoxInstaller.EnsureLatestInstalledAsync(_settings.InstalledEngineVersion);
+            await RememberInstalledEngineAsync(update.RunExecutablePath, update.Version);
+
+            if (!update.UpdatedFromOlderVersion || !update.InstalledNow)
+            {
+                return;
+            }
+
+            var client = CreateApiClient();
+            if (!await client.IsEngineAvailableAsync())
+            {
+                await _processManager.StartAsync(
+                    update.RunExecutablePath,
+                    _settings.EngineBaseUrl,
+                    CreateApiClient);
+
+                SetStatusSafe("新しい VOICEVOX を自動更新して起動しました。");
+                return;
+            }
+
+            SetStatusSafe("新しい VOICEVOX を自動ダウンロードしました。次回から使えます。");
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task RememberInstalledEngineAsync(string runExecutablePath, string? version)
     {
         var engineDirectory = Path.GetDirectoryName(runExecutablePath);
         if (string.IsNullOrWhiteSpace(engineDirectory))
@@ -327,13 +363,31 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (string.Equals(_settings.InstalledEnginePath, engineDirectory, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(_settings.InstalledEnginePath, engineDirectory, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(_settings.InstalledEngineVersion, version, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
         _settings.InstalledEnginePath = engineDirectory;
+        _settings.InstalledEngineVersion = version;
         await _settingsStore.SaveAsync(_settings);
+    }
+
+    private void SetStatusSafe(string text)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => _statusLabel.Text = text);
+            return;
+        }
+
+        _statusLabel.Text = text;
     }
 
     private sealed record AudioDeviceItem(int DeviceNumber, string Name);

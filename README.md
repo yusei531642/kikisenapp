@@ -19,6 +19,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 - `setup.exe` 実行中に VOICEVOX ENGINE の最新 Windows GPU 版を外部ダウンロード
 - `VB-CABLE Virtual Audio Device` はインストーラー同封のファイルからセットアップ起動
 - `setup.exe` 後にアプリを開くと、見つかった `VOICEVOX ENGINE` を自動で起動しやすい
+- アプリ起動時に `VOICEVOX ENGINE` の新しい GitHub Release を自動確認して、必要なら自動ダウンロード
 - Discord で使うための手順をアプリ内で確認
 - メイン画面は「入力」と「送信」だけにして、細かい設定は `設定` ウィンドウに分離
 

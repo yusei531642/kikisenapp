@@ -84,3 +84,35 @@ public static class VoicevoxReleaseAssetSelector
         throw new InvalidOperationException("VOICEVOX ENGINE の Windows GPU 版アセットが見つかりませんでした。");
     }
 }
+
+public static class VoicevoxVersionComparer
+{
+    public static bool IsNewerVersion(string latestVersion, string? installedVersion)
+    {
+        var normalizedLatest = Normalize(latestVersion);
+        var normalizedInstalled = Normalize(installedVersion);
+
+        if (string.IsNullOrWhiteSpace(normalizedLatest))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedInstalled))
+        {
+            return true;
+        }
+
+        if (Version.TryParse(normalizedLatest, out var latest) &&
+            Version.TryParse(normalizedInstalled, out var installed))
+        {
+            return latest > installed;
+        }
+
+        return !string.Equals(normalizedLatest, normalizedInstalled, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Normalize(string? version)
+    {
+        return (version ?? string.Empty).Trim().TrimStart('v', 'V');
+    }
+}

@@ -33,12 +33,36 @@ public sealed class VoicevoxEngineInstaller
         return VoicevoxReleaseAssetSelector.SelectWindowsGpuAsset(release, preferredVariant);
     }
 
+    public async Task<VoicevoxAutomaticUpdateResult> EnsureLatestInstalledAsync(
+        string? installedVersion,
+        IProgress<SetupProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var latestAsset = await GetLatestReleaseAssetAsync(cancellationToken);
+        var installResult = await EnsureInstalledAsync(latestAsset, progress, cancellationToken);
+
+        return new VoicevoxAutomaticUpdateResult(
+            Version: installResult.Version,
+            Variant: installResult.Variant,
+            RunExecutablePath: installResult.RunExecutablePath,
+            InstalledNow: installResult.InstalledNow,
+            UpdatedFromOlderVersion: VoicevoxVersionComparer.IsNewerVersion(latestAsset.Version, installedVersion));
+    }
+
     public async Task<VoicevoxInstallationResult> EnsureInstalledAsync(
         IProgress<SetupProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        _paths.EnsureDirectories();
         var latestAsset = await GetLatestReleaseAssetAsync(cancellationToken);
+        return await EnsureInstalledAsync(latestAsset, progress, cancellationToken);
+    }
+
+    private async Task<VoicevoxInstallationResult> EnsureInstalledAsync(
+        VoicevoxReleaseAsset latestAsset,
+        IProgress<SetupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        _paths.EnsureDirectories();
         var installDirectory = Path.Combine(
             _paths.EngineDirectory,
             $"{latestAsset.Version}-{latestAsset.Variant.ToString().ToLowerInvariant()}");
@@ -158,3 +182,10 @@ public sealed record VoicevoxInstallationResult(
     VoicevoxEngineVariant Variant,
     string RunExecutablePath,
     bool InstalledNow);
+
+public sealed record VoicevoxAutomaticUpdateResult(
+    string Version,
+    VoicevoxEngineVariant Variant,
+    string RunExecutablePath,
+    bool InstalledNow,
+    bool UpdatedFromOlderVersion);
