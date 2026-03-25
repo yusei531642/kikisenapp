@@ -7,8 +7,9 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 - メイン画面は `入力` と `送信` だけのシンプル構成
 - 話者、再生先、音量などの細かい設定は別ウィンドウに分離
-- `VOICEVOX ENGINE` の GPU 版を自動セットアップ
+- `VOICEVOX ENGINE` は `setup.exe` 側で導入
 - `VB-CABLE Virtual Audio Device` をインストーラーに同封
+- `Whisper` は設定画面の専用タブから、モデルの重さを見て選んでダウンロード
 - `setup.exe` 形式のインストーラーを作成可能
 - `kikisenapp.png` をアプリアイコンとインストーラーアイコンに使用
 
@@ -18,6 +19,9 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 - 再生先デバイスを選んで、VB-CABLE などの仮想オーディオへ出力
 - `setup.exe` 実行中に VOICEVOX ENGINE の最新 Windows GPU 版を外部ダウンロード
 - `VB-CABLE Virtual Audio Device` はインストーラー同封のファイルからセットアップ起動
+- `setup.exe` 後にアプリを開くと、見つかった `VOICEVOX ENGINE` を自動で起動しやすい
+- アプリ起動時に `VOICEVOX ENGINE` の新しい GitHub Release を自動確認して、必要なら自動ダウンロード
+- Whisper でリアルタイムに聞き取り、文章の終わりごとに VOICEVOX で自動読み上げ
 - Discord で使うための手順をアプリ内で確認
 - メイン画面は「入力」と「送信」だけにして、細かい設定は `設定` ウィンドウに分離
 
@@ -28,6 +32,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 - NVIDIA GPU がない場合は `DirectML版` を使用
 - `setup.exe` 実行時は VOICEVOX ダウンロードのためインターネット接続が必要
 - `VB-CABLE` の導入には管理者権限が必要
+- Whisper モデルのダウンロード時もインターネット接続が必要
 
 ## ダウンロード
 
@@ -36,7 +41,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 ## 先に知っておいてほしいこと
 
-- VOICEVOX ENGINE はアプリから自動取得できます。
+- VOICEVOX ENGINE は `setup.exe` 側で入れる前提です。
 - このPCでは GPU を見て、`NVIDIA版` を優先し、使えない場合は `DirectML版` に切り替えます。
 - `setup.exe` では `VB-CABLE` を同封し、`VOICEVOX ENGINE` はセットアップ中に外部ダウンロードします。
 - ただし、Windows の仕様で管理者権限の許可と、場合によっては再起動が必要です。
@@ -49,10 +54,13 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 4. `VB-CABLE` のセットアップ画面が開いたら、管理者権限を許可して完了します。
 5. 必要なら Windows を再起動します。
 6. アプリを起動して右下の `設定` を押します。
-7. `セットアップ` タブで `VOICEVOX を起動` を押します。
+7. ふつうは自動で `VOICEVOX` を見つけて起動します。うまくいかないときだけ `VOICEVOX を起動` を押します。
 8. Discord の入力デバイスを `CABLE Output` にします。
 9. `音声設定` タブで再生先を `CABLE Input` にして保存します。
-10. メイン画面に戻って文字を入れ、`送信` を押します。
+10. `Whisper` タブで入力デバイスを選び、使いたいモデルを選びます。重いモデルほど精度は上がりやすいですが、ダウンロードも起動も重くなります。
+11. `モデルをダウンロード` を押して、準備が終わったら `Whisper を開始` を押します。
+12. 話した内容は文の終わりごとに自動で VOICEVOX から読み上げられます。
+13. 手入力で読み上げたいときは、メイン画面に戻って文字を入れ、`送信` を押します。
 
 ## 開発環境の準備
 

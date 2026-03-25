@@ -8,11 +8,26 @@ public sealed class AppSettings
 
     public string? SelectedOutputDeviceName { get; set; }
 
+    public WhisperSettings Whisper { get; set; } = new();
+
     public VoiceTuningSettings VoiceTuning { get; set; } = new();
 
     public string? InstalledEnginePath { get; set; }
 
     public string? InstalledEngineVersion { get; set; }
+}
+
+public sealed class WhisperSettings
+{
+    public string SelectedModelId { get; set; } = "tiny";
+
+    public string? SelectedInputDeviceName { get; set; }
+
+    public int SegmentDurationMilliseconds { get; set; } = 2200;
+
+    public float SilenceThreshold { get; set; } = 0.015f;
+
+    public int FlushAfterSilenceMilliseconds { get; set; } = 1800;
 }
 
 public sealed class VoiceTuningSettings

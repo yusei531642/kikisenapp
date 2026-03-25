@@ -1,5 +1,6 @@
 using KikisenApp.Core;
 using NAudio.Wave;
+using System.Threading.Channels;
 
 namespace KikisenApp.Desktop;
 
@@ -12,11 +13,15 @@ public sealed class MainForm : Form
     private readonly VoicevoxEngineInstaller _voicevoxInstaller;
     private readonly VbCableInstaller _vbCableInstaller;
     private readonly VoicevoxEngineProcessManager _processManager = new();
+    private readonly Channel<string> _whisperSpeechQueue = Channel.CreateUnbounded<string>();
 
     private AppSettings _settings = new();
     private IWavePlayer? _waveOut;
     private WaveStream? _currentWaveStream;
     private MemoryStream? _currentAudioStream;
+    private WhisperController? _whisperController;
+    private CancellationTokenSource? _whisperQueueCancellationTokenSource;
+    private Task? _whisperQueueTask;
 
     private readonly TextBox _speechTextBox = new();
     private readonly Button _speakButton = new();
@@ -56,12 +61,22 @@ public sealed class MainForm : Form
 
         _settings = await _settingsStore.LoadAsync();
         _engineHttpClient.BaseAddress = new Uri($"{_settings.EngineBaseUrl.TrimEnd('/')}/");
-        _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+        _statusLabel.Text = "VOICEVOX を確認しています。";
+        EnsureWhisperController();
+        StartWhisperQueueProcessor();
+
+        await TryAutoStartInstalledEngineAsync();
+        _ = CheckForVoicevoxUpdatesAsync();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         StopPlayback();
+        _whisperSpeechQueue.Writer.TryComplete();
+        _whisperQueueCancellationTokenSource?.Cancel();
+        _whisperQueueTask?.Wait(TimeSpan.FromSeconds(3));
+        _whisperController?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _whisperQueueCancellationTokenSource?.Dispose();
         _processManager.Stop();
         _engineHttpClient.Dispose();
         _setupHttpClient.Dispose();
@@ -130,61 +145,30 @@ public sealed class MainForm : Form
 
     private void OpenSettingsWindow()
     {
+        EnsureWhisperController();
+
         using var form = new SettingsForm(
             _paths,
             _settingsStore,
             _settings,
             _engineHttpClient,
-            _voicevoxInstaller,
             _vbCableInstaller,
-            _processManager);
+            _processManager,
+            _whisperController!);
 
         form.ShowDialog(this);
     }
 
     private async Task SpeakAsync()
     {
-        var rawText = _speechTextBox.Text;
-        var text = _settings.VoiceTuning.NormalizeText
-            ? VoiceTextFormatter.NormalizeForSpeech(rawText)
-            : rawText.Trim();
-
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            MessageBox.Show(this, "読み上げる文字を入力してください。", "未入力", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        _speakButton.Enabled = false;
-        _statusLabel.Text = "送信中です。";
-
         try
         {
-            var client = CreateApiClient();
-            if (!await client.IsEngineAvailableAsync())
-            {
-                throw new InvalidOperationException("VOICEVOX ENGINE が起動していません。設定からセットアップしてください。");
-            }
-
-            var speakerId = await ResolveSpeakerIdAsync(client);
-            var outputDevice = FindPreferredOutputDevice();
-            if (outputDevice is null)
-            {
-                throw new InvalidOperationException("再生先デバイスが見つかりません。設定画面で選んでください。");
-            }
-
-            var synthesized = await client.SynthesizeAsync(text, speakerId, _settings.VoiceTuning);
-            PlayWave(synthesized.WaveBytes, outputDevice.DeviceNumber);
-            _statusLabel.Text = $"送信しました: {outputDevice.Name}";
+            await SpeakTextAsync(_speechTextBox.Text, updateTextBox: false);
         }
         catch (Exception ex)
         {
             _statusLabel.Text = "送信に失敗しました。";
             MessageBox.Show(this, ex.Message, "送信失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally
-        {
-            _speakButton.Enabled = true;
         }
     }
 
@@ -259,6 +243,234 @@ public sealed class MainForm : Form
     private VoicevoxApiClient CreateApiClient()
     {
         return new VoicevoxApiClient(_engineHttpClient);
+    }
+
+    private async Task SpeakTextAsync(string rawText, bool updateTextBox)
+    {
+        var text = _settings.VoiceTuning.NormalizeText
+            ? VoiceTextFormatter.NormalizeForSpeech(rawText)
+            : rawText.Trim();
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException("読み上げる文字がありません。");
+        }
+
+        if (updateTextBox)
+        {
+            SetSpeechTextSafe(text);
+        }
+
+        _speakButton.Enabled = false;
+        _statusLabel.Text = "送信中です。";
+
+        try
+        {
+            var client = await EnsureEngineReadyAsync();
+            var speakerId = await ResolveSpeakerIdAsync(client);
+            var outputDevice = FindPreferredOutputDevice();
+            if (outputDevice is null)
+            {
+                throw new InvalidOperationException("再生先デバイスが見つかりません。設定画面で選んでください。");
+            }
+
+            var synthesized = await client.SynthesizeAsync(text, speakerId, _settings.VoiceTuning);
+            PlayWave(synthesized.WaveBytes, outputDevice.DeviceNumber);
+            _statusLabel.Text = $"送信しました: {outputDevice.Name}";
+        }
+        finally
+        {
+            _speakButton.Enabled = true;
+        }
+    }
+
+    private async Task<VoicevoxApiClient> EnsureEngineReadyAsync()
+    {
+        var client = CreateApiClient();
+        if (await client.IsEngineAvailableAsync())
+        {
+            return client;
+        }
+
+        var runExecutablePath = FindInstalledRunExecutablePath();
+        if (runExecutablePath is null)
+        {
+            throw new InvalidOperationException("VOICEVOX ENGINE が見つかりません。setup か設定画面からセットアップしてください。");
+        }
+
+        _statusLabel.Text = "VOICEVOX を起動しています。";
+        var startedNow = await _processManager.StartAsync(
+            runExecutablePath,
+            _settings.EngineBaseUrl,
+            CreateApiClient);
+
+        await RememberInstalledEngineAsync(runExecutablePath, _settings.InstalledEngineVersion);
+        _statusLabel.Text = startedNow
+            ? "VOICEVOX を起動しました。"
+            : "VOICEVOX はすでに起動しています。";
+
+        return CreateApiClient();
+    }
+
+    private async Task TryAutoStartInstalledEngineAsync()
+    {
+        try
+        {
+            var client = await EnsureEngineReadyAsync();
+            if (await client.IsEngineAvailableAsync())
+            {
+                _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+            }
+        }
+        catch
+        {
+            _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+        }
+    }
+
+    private string? FindInstalledRunExecutablePath()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.InstalledEnginePath) && Directory.Exists(_settings.InstalledEnginePath))
+        {
+            var configuredPath = Directory
+                .EnumerateFiles(_settings.InstalledEnginePath, "run.exe", SearchOption.AllDirectories)
+                .FirstOrDefault();
+
+            if (configuredPath is not null)
+            {
+                return configuredPath;
+            }
+        }
+
+        return Directory.Exists(_paths.EngineDirectory)
+            ? Directory.EnumerateFiles(_paths.EngineDirectory, "run.exe", SearchOption.AllDirectories).FirstOrDefault()
+            : null;
+    }
+
+    private async Task CheckForVoicevoxUpdatesAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+
+            var update = await _voicevoxInstaller.EnsureLatestInstalledAsync(_settings.InstalledEngineVersion);
+            await RememberInstalledEngineAsync(update.RunExecutablePath, update.Version);
+
+            if (!update.UpdatedFromOlderVersion || !update.InstalledNow)
+            {
+                return;
+            }
+
+            var client = CreateApiClient();
+            if (!await client.IsEngineAvailableAsync())
+            {
+                await _processManager.StartAsync(
+                    update.RunExecutablePath,
+                    _settings.EngineBaseUrl,
+                    CreateApiClient);
+
+                SetStatusSafe("新しい VOICEVOX を自動更新して起動しました。");
+                return;
+            }
+
+            SetStatusSafe("新しい VOICEVOX を自動ダウンロードしました。次回から使えます。");
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task RememberInstalledEngineAsync(string runExecutablePath, string? version)
+    {
+        var engineDirectory = Path.GetDirectoryName(runExecutablePath);
+        if (string.IsNullOrWhiteSpace(engineDirectory))
+        {
+            return;
+        }
+
+        if (string.Equals(_settings.InstalledEnginePath, engineDirectory, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(_settings.InstalledEngineVersion, version, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _settings.InstalledEnginePath = engineDirectory;
+        _settings.InstalledEngineVersion = version;
+        await _settingsStore.SaveAsync(_settings);
+    }
+
+    private void SetStatusSafe(string text)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => _statusLabel.Text = text);
+            return;
+        }
+
+        _statusLabel.Text = text;
+    }
+
+    private void SetSpeechTextSafe(string text)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => _speechTextBox.Text = text);
+            return;
+        }
+
+        _speechTextBox.Text = text;
+    }
+
+    private void EnsureWhisperController()
+    {
+        if (_whisperController is not null)
+        {
+            return;
+        }
+
+        _whisperController = new WhisperController(_settings, _paths);
+        _whisperController.StatusChanged += SetStatusSafe;
+        _whisperController.SentenceReady += sentence => _whisperSpeechQueue.Writer.TryWrite(sentence);
+    }
+
+    private void StartWhisperQueueProcessor()
+    {
+        if (_whisperQueueTask is not null)
+        {
+            return;
+        }
+
+        _whisperQueueCancellationTokenSource = new CancellationTokenSource();
+        _whisperQueueTask = Task.Run(() => ProcessWhisperSpeechQueueAsync(_whisperQueueCancellationTokenSource.Token));
+    }
+
+    private async Task ProcessWhisperSpeechQueueAsync(CancellationToken cancellationToken)
+    {
+        await foreach (var sentence in _whisperSpeechQueue.Reader.ReadAllAsync(cancellationToken))
+        {
+            try
+            {
+                await SpeakTextAsync(sentence, updateTextBox: true);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                SetStatusSafe($"Whisper の読み上げに失敗しました: {ex.Message}");
+            }
+        }
     }
 
     private sealed record AudioDeviceItem(int DeviceNumber, string Name);
