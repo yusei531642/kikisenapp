@@ -55,8 +55,12 @@ public sealed class MainForm : Form
 
         Text = "KikisenApp - Discord 読み上げ";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1040, 720);
-        Font = new Font("Meiryo UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        Size = new Size(860, 560);
+        MinimumSize = new Size(700, 480);
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        MinimizeBox = true;
+        Font = new Font("Meiryo UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
         BuildUi();
     }
@@ -87,7 +91,8 @@ public sealed class MainForm : Form
     {
         var tabs = new TabControl
         {
-            Dock = DockStyle.Fill
+            Dock = DockStyle.Fill,
+            Padding = new Point(14, 6)
         };
 
         tabs.TabPages.Add(BuildSpeechTab());
@@ -100,28 +105,29 @@ public sealed class MainForm : Form
     private TabPage BuildSpeechTab()
     {
         var page = new TabPage("しゃべる");
+        page.Padding = new Padding(4);
 
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 7,
-            Padding = new Padding(16)
+            Padding = new Padding(12)
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
 
         _speechTextBox.Multiline = true;
         _speechTextBox.ScrollBars = ScrollBars.Vertical;
         _speechTextBox.Dock = DockStyle.Fill;
-        _speechTextBox.Font = new Font("Meiryo UI", 11F, FontStyle.Regular, GraphicsUnit.Point);
+        _speechTextBox.Font = new Font("Meiryo UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
         _speechTextBox.Text = "こんにちは。Discord に流す読み上げテストです。";
 
         _speakerComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -155,6 +161,7 @@ public sealed class MainForm : Form
 
         _speechStatusLabel.Text = "ここに状態が表示されます。";
         _speechStatusLabel.Dock = DockStyle.Fill;
+        _speechStatusLabel.AutoEllipsis = true;
 
         table.Controls.Add(CreateLabel("読み上げる文章"), 0, 0);
         table.Controls.Add(CreateLabel(""), 1, 0);
@@ -176,7 +183,9 @@ public sealed class MainForm : Form
         var actionPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoScroll = true
         };
         actionPanel.Controls.Add(_speakButton);
         actionPanel.Controls.Add(_stopButton);
@@ -193,18 +202,19 @@ public sealed class MainForm : Form
     private TabPage BuildSetupTab()
     {
         var page = new TabPage("セットアップ");
+        page.Padding = new Padding(4);
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 5,
-            Padding = new Padding(16)
+            Padding = new Padding(12)
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _setupStatusLabel.Text = "初回は VOICEVOX を自動セットアップしてください。";
@@ -235,12 +245,13 @@ public sealed class MainForm : Form
         _setupLogTextBox.ScrollBars = ScrollBars.Vertical;
         _setupLogTextBox.ReadOnly = true;
         _setupLogTextBox.Dock = DockStyle.Fill;
-        _setupLogTextBox.Font = new Font("Consolas", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        _setupLogTextBox.Font = new Font("Consolas", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
         var buttonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
         };
         buttonPanel.Controls.Add(_installVoicevoxButton);
         buttonPanel.Controls.Add(_startVoicevoxButton);
@@ -259,12 +270,13 @@ public sealed class MainForm : Form
     private TabPage BuildGuideTab()
     {
         var page = new TabPage("使い方");
+        page.Padding = new Padding(4);
 
         _guideTextBox.Multiline = true;
         _guideTextBox.ReadOnly = true;
         _guideTextBox.ScrollBars = ScrollBars.Vertical;
         _guideTextBox.Dock = DockStyle.Fill;
-        _guideTextBox.Font = new Font("Meiryo UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        _guideTextBox.Font = new Font("Meiryo UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
         page.Controls.Add(_guideTextBox);
         return page;
