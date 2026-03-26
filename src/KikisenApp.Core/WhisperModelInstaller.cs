@@ -32,19 +32,34 @@ public sealed class WhisperModelInstaller
         var modelPath = GetModelPath(model);
         if (IsInstalled(model))
         {
-            progress?.Report(new SetupProgress("install", $"Whisper モデル {model.DisplayName} はすでに準備されています。"));
+            var existingSize = new FileInfo(modelPath).Length;
+            progress?.Report(new SetupProgress("install", $"Whisper モデル {model.DisplayName} はすでに準備されています。", existingSize, existingSize));
             return modelPath;
         }
 
-        progress?.Report(new SetupProgress("download", $"Whisper モデル {model.DisplayName} をダウンロードしています。"));
+        progress?.Report(new SetupProgress("download", $"Whisper モデル {model.DisplayName} をダウンロードしています。", 0, model.ApproximateSizeBytes));
 
         await using var modelStream = await WhisperGgmlDownloader.Default
             .GetGgmlModelAsync(model.ModelType, QuantizationType.NoQuantization, cancellationToken);
 
         await using var fileStream = File.Create(modelPath);
-        await modelStream.CopyToAsync(fileStream, cancellationToken);
+        var buffer = new byte[1024 * 1024];
+        long receivedBytes = 0;
 
-        progress?.Report(new SetupProgress("complete", $"Whisper モデル {model.DisplayName} の準備が完了しました。"));
+        while (true)
+        {
+            var read = await modelStream.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            receivedBytes += read;
+            progress?.Report(new SetupProgress("download", $"Whisper モデル {model.DisplayName} をダウンロードしています。", receivedBytes, model.ApproximateSizeBytes));
+        }
+
+        progress?.Report(new SetupProgress("complete", $"Whisper モデル {model.DisplayName} の準備が完了しました。", receivedBytes, receivedBytes));
         return modelPath;
     }
 }

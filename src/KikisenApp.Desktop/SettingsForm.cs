@@ -12,9 +12,12 @@ public sealed class SettingsForm : Form
     private readonly HttpClient _engineHttpClient;
     private readonly VbCableInstaller _vbCableInstaller;
     private readonly WhisperController _whisperController;
+    private readonly AppUpdateService _appUpdateService;
+    private readonly SpeechPlaybackService _previewPlaybackService = new();
 
     private List<SpeakerItem> _speakerItems = [];
     private List<WhisperModelItem> _whisperModelItems = [];
+    private AppUpdateCheckResult? _lastUpdateCheckResult;
 
     private readonly ComboBox _speakerComboBox = new();
     private readonly ComboBox _outputDeviceComboBox = new();
@@ -24,8 +27,10 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _volumeScaleUpDown = new();
     private readonly TextBox _engineBaseUrlTextBox = new();
     private readonly CheckBox _normalizeTextCheckBox = new();
+    private readonly CheckBox _monitorSpeechLocallyCheckBox = new();
     private readonly Button _reloadDevicesButton = new();
     private readonly Button _testVoicevoxConnectionButton = new();
+    private readonly Button _testSpeakerButton = new();
     private readonly Button _saveSettingsButton = new();
     private readonly Label _voiceStatusLabel = new();
     private readonly TextBox _setupLogTextBox = new();
@@ -46,19 +51,30 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _whisperFlushUpDown = new();
     private readonly NumericUpDown _whisperSilenceUpDown = new();
     private readonly TextBox _guideTextBox = new();
+    private readonly ProgressBar _whisperProgressBar = new();
+    private readonly CheckBox _keepMainWindowMaximizedCheckBox = new();
+    private readonly CheckBox _autoUpdateCheckBox = new();
+    private readonly Button _checkForUpdatesButton = new();
+    private readonly Button _openGitHubButton = new();
+    private readonly Button _openReleasesPageButton = new();
+    private readonly Button _saveDisplaySettingsButton = new();
+    private readonly Label _aboutStatusLabel = new();
+    private readonly TextBox _aboutTextBox = new();
 
     public SettingsForm(
         AppSettingsStore settingsStore,
         AppSettings settings,
         HttpClient engineHttpClient,
         VbCableInstaller vbCableInstaller,
-        WhisperController whisperController)
+        WhisperController whisperController,
+        AppUpdateService appUpdateService)
     {
         _settingsStore = settingsStore;
         _settings = settings;
         _engineHttpClient = engineHttpClient;
         _vbCableInstaller = vbCableInstaller;
         _whisperController = whisperController;
+        _appUpdateService = appUpdateService;
 
         Text = "設定";
         Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -82,10 +98,12 @@ public sealed class SettingsForm : Form
 
         ApplySettingsToUi();
         ApplyWhisperSettingsToUi();
+        ApplyDisplaySettingsToUi();
         ReloadAudioDevices();
         ReloadWhisperInputDevices();
         LoadWhisperModels();
         UpdateWhisperUiState();
+        UpdateAboutInfo();
         await LoadSpeakersAsync();
         UpdateSetupGuide();
     }
@@ -94,6 +112,7 @@ public sealed class SettingsForm : Form
     {
         _whisperController.StatusChanged -= OnWhisperStatusChanged;
         _whisperController.RunningStateChanged -= OnWhisperRunningStateChanged;
+        _previewPlaybackService.Dispose();
         base.OnFormClosed(e);
     }
 
@@ -109,6 +128,7 @@ public sealed class SettingsForm : Form
         tabs.TabPages.Add(BuildSetupTab());
         tabs.TabPages.Add(BuildWhisperTab());
         tabs.TabPages.Add(BuildGuideTab());
+        tabs.TabPages.Add(BuildAboutTab());
 
         Controls.Add(tabs);
     }
@@ -124,7 +144,7 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 7,
+            RowCount = 8,
             Padding = new Padding(12)
         };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
@@ -133,6 +153,7 @@ public sealed class SettingsForm : Form
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -162,9 +183,16 @@ public sealed class SettingsForm : Form
         _testVoicevoxConnectionButton.AutoSize = true;
         _testVoicevoxConnectionButton.Click += async (_, _) => await CheckVoicevoxConnectionAsync();
 
+        _testSpeakerButton.Text = "テスト再生";
+        _testSpeakerButton.AutoSize = true;
+        _testSpeakerButton.Click += async (_, _) => await PreviewSpeakerAsync();
+
         _saveSettingsButton.Text = "保存";
         _saveSettingsButton.AutoSize = true;
         _saveSettingsButton.Click += async (_, _) => await SaveSettingsFromUiAsync("設定を保存しました。");
+
+        _monitorSpeechLocallyCheckBox.Text = "読み上げた内容を自分のスピーカーでも聞く";
+        _monitorSpeechLocallyCheckBox.AutoSize = true;
 
         _voiceStatusLabel.Dock = DockStyle.Fill;
         _voiceStatusLabel.AutoEllipsis = true;
@@ -174,7 +202,7 @@ public sealed class SettingsForm : Form
         table.Controls.Add(CreateRowPanel(_engineBaseUrlTextBox, _testVoicevoxConnectionButton), 1, 0);
 
         table.Controls.Add(CreateLabel("話者"), 0, 1);
-        table.Controls.Add(_speakerComboBox, 1, 1);
+        table.Controls.Add(CreateRowPanel(_speakerComboBox, _testSpeakerButton), 1, 1);
 
         table.Controls.Add(CreateLabel("再生先デバイス"), 0, 2);
         table.Controls.Add(CreateRowPanel(_outputDeviceComboBox, _reloadDevicesButton), 1, 2);
@@ -185,6 +213,9 @@ public sealed class SettingsForm : Form
         table.Controls.Add(CreateLabel("文字の整形"), 0, 4);
         table.Controls.Add(_normalizeTextCheckBox, 1, 4);
 
+        table.Controls.Add(CreateLabel("モニター"), 0, 5);
+        table.Controls.Add(_monitorSpeechLocallyCheckBox, 1, 5);
+
         var bottomPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -194,7 +225,7 @@ public sealed class SettingsForm : Form
         bottomPanel.Controls.Add(_saveSettingsButton);
         bottomPanel.Controls.Add(_voiceStatusLabel);
 
-        table.Controls.Add(bottomPanel, 0, 5);
+        table.Controls.Add(bottomPanel, 0, 6);
         table.SetColumnSpan(bottomPanel, 2);
 
         page.Controls.Add(table);
@@ -282,7 +313,7 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 8,
+            RowCount = 9,
             Padding = new Padding(12)
         };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
@@ -294,6 +325,7 @@ public sealed class SettingsForm : Form
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _whisperModelComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -327,6 +359,11 @@ public sealed class SettingsForm : Form
         _whisperStatusLabel.AutoEllipsis = true;
         _whisperStatusLabel.Text = "モデルを選んでダウンロードしたあと、開始を押すと聞き取りできます。";
 
+        _whisperProgressBar.Dock = DockStyle.Fill;
+        _whisperProgressBar.Minimum = 0;
+        _whisperProgressBar.Maximum = 100;
+        _whisperProgressBar.Style = ProgressBarStyle.Continuous;
+
         ConfigureWholeNumber(_whisperSegmentUpDown, 1000, 8000, 2200, 100);
         ConfigureWholeNumber(_whisperFlushUpDown, 1000, 8000, 1800, 100);
         ConfigureFraction(_whisperSilenceUpDown, 0.001m, 0.100m, 0.015m, 0.001m, 3);
@@ -356,6 +393,8 @@ public sealed class SettingsForm : Form
         table.SetColumnSpan(actionPanel, 2);
         table.Controls.Add(_whisperStatusLabel, 0, 6);
         table.SetColumnSpan(_whisperStatusLabel, 2);
+        table.Controls.Add(_whisperProgressBar, 0, 7);
+        table.SetColumnSpan(_whisperProgressBar, 2);
 
         page.Controls.Add(table);
         return page;
@@ -375,6 +414,86 @@ public sealed class SettingsForm : Form
         _guideTextBox.Font = new Font("Meiryo UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
         page.Controls.Add(_guideTextBox);
+        return page;
+    }
+
+    private TabPage BuildAboutTab()
+    {
+        var page = new TabPage("表示 / About")
+        {
+            Padding = new Padding(4)
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            Padding = new Padding(12)
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        _keepMainWindowMaximizedCheckBox.Text = "メイン画面を常に最大化で表示する";
+        _keepMainWindowMaximizedCheckBox.AutoSize = true;
+
+        _autoUpdateCheckBox.Text = "起動時に最新版を自動確認する";
+        _autoUpdateCheckBox.AutoSize = true;
+
+        var settingsPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false
+        };
+        settingsPanel.Controls.Add(_keepMainWindowMaximizedCheckBox);
+        settingsPanel.Controls.Add(_autoUpdateCheckBox);
+
+        _saveDisplaySettingsButton.Text = "表示と更新設定を保存";
+        _saveDisplaySettingsButton.AutoSize = true;
+        _saveDisplaySettingsButton.Click += async (_, _) => await SaveDisplaySettingsFromUiAsync("表示と更新設定を保存しました。");
+
+        _checkForUpdatesButton.Text = "最新版を確認";
+        _checkForUpdatesButton.AutoSize = true;
+        _checkForUpdatesButton.Click += async (_, _) => await CheckForAppUpdatesAsync();
+
+        _openGitHubButton.Text = "GitHub を開く";
+        _openGitHubButton.AutoSize = true;
+        _openGitHubButton.Click += (_, _) => OpenUrl(ExternalLinks.AppRepository);
+
+        _openReleasesPageButton.Text = "Release を開く";
+        _openReleasesPageButton.AutoSize = true;
+        _openReleasesPageButton.Click += (_, _) => OpenUrl(_lastUpdateCheckResult?.ReleasePageUrl ?? ExternalLinks.AppReleasesPage);
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+        buttonPanel.Controls.Add(_saveDisplaySettingsButton);
+        buttonPanel.Controls.Add(_checkForUpdatesButton);
+        buttonPanel.Controls.Add(_openGitHubButton);
+        buttonPanel.Controls.Add(_openReleasesPageButton);
+
+        _aboutStatusLabel.Dock = DockStyle.Fill;
+        _aboutStatusLabel.Text = "バージョン、クレジット、更新確認をここで見られます。";
+        _aboutStatusLabel.AutoEllipsis = true;
+
+        _aboutTextBox.Multiline = true;
+        _aboutTextBox.ReadOnly = true;
+        _aboutTextBox.ScrollBars = ScrollBars.Vertical;
+        _aboutTextBox.Dock = DockStyle.Fill;
+        _aboutTextBox.Font = new Font("Meiryo UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+
+        layout.Controls.Add(settingsPanel, 0, 0);
+        layout.Controls.Add(buttonPanel, 0, 1);
+        layout.Controls.Add(_aboutStatusLabel, 0, 2);
+        layout.Controls.Add(_aboutTextBox, 0, 3);
+
+        page.Controls.Add(layout);
         return page;
     }
 
@@ -443,7 +562,9 @@ public sealed class SettingsForm : Form
 
         _whisperInputDeviceComboBox.Items.AddRange(devices.Cast<object>().ToArray());
 
-        var selected = devices.FirstOrDefault(x => string.Equals(x.Name, _settings.Whisper.SelectedInputDeviceName, StringComparison.OrdinalIgnoreCase))
+        var selected = string.IsNullOrWhiteSpace(_settings.Whisper.SelectedInputDeviceName)
+            ? devices.FirstOrDefault(x => x.DeviceNumber == -1)
+            : devices.FirstOrDefault(x => string.Equals(x.Name, _settings.Whisper.SelectedInputDeviceName, StringComparison.OrdinalIgnoreCase))
             ?? devices.FirstOrDefault();
 
         if (selected is not null)
@@ -483,6 +604,7 @@ public sealed class SettingsForm : Form
         _settings.VoiceTuning.IntonationScale = _intonationScaleUpDown.Value;
         _settings.VoiceTuning.VolumeScale = _volumeScaleUpDown.Value;
         _settings.VoiceTuning.NormalizeText = _normalizeTextCheckBox.Checked;
+        _settings.MonitorSpeechLocally = _monitorSpeechLocallyCheckBox.Checked;
         _engineHttpClient.BaseAddress = new Uri($"{_settings.EngineBaseUrl.TrimEnd('/')}/");
 
         await _settingsStore.SaveAsync(_settings);
@@ -496,7 +618,8 @@ public sealed class SettingsForm : Form
     private async Task SaveWhisperSettingsFromUiAsync(string? successMessage)
     {
         _settings.Whisper.SelectedModelId = (_whisperModelComboBox.SelectedItem as WhisperModelItem)?.Definition.Id ?? _settings.Whisper.SelectedModelId;
-        _settings.Whisper.SelectedInputDeviceName = (_whisperInputDeviceComboBox.SelectedItem as WhisperInputDeviceItem)?.Name;
+        var selectedInputDevice = _whisperInputDeviceComboBox.SelectedItem as WhisperInputDeviceItem;
+        _settings.Whisper.SelectedInputDeviceName = selectedInputDevice?.DeviceNumber == -1 ? null : selectedInputDevice?.Name;
         _settings.Whisper.SegmentDurationMilliseconds = (int)_whisperSegmentUpDown.Value;
         _settings.Whisper.FlushAfterSilenceMilliseconds = (int)_whisperFlushUpDown.Value;
         _settings.Whisper.SilenceThreshold = (float)_whisperSilenceUpDown.Value;
@@ -605,7 +728,12 @@ public sealed class SettingsForm : Form
         try
         {
             await SaveWhisperSettingsFromUiAsync(null);
-            var progress = new Progress<SetupProgress>(info => _whisperStatusLabel.Text = info.Message);
+            UpdateWhisperProgressBar(0, null);
+            var progress = new Progress<SetupProgress>(info =>
+            {
+                _whisperStatusLabel.Text = info.Message;
+                UpdateWhisperProgressBar(info.ReceivedBytes, info.TotalBytes);
+            });
             await _whisperController.DownloadModelAsync(model.Id, progress);
             LoadWhisperModels();
             UpdateSelectedWhisperModelDescription();
@@ -618,6 +746,7 @@ public sealed class SettingsForm : Form
         finally
         {
             ToggleWhisperButtons(true);
+            UpdateWhisperProgressBar(100, 100);
             UpdateWhisperUiState();
         }
     }
@@ -659,6 +788,7 @@ public sealed class SettingsForm : Form
         _intonationScaleUpDown.Value = _settings.VoiceTuning.IntonationScale;
         _volumeScaleUpDown.Value = _settings.VoiceTuning.VolumeScale;
         _normalizeTextCheckBox.Checked = _settings.VoiceTuning.NormalizeText;
+        _monitorSpeechLocallyCheckBox.Checked = _settings.MonitorSpeechLocally;
     }
 
     private void ApplyWhisperSettingsToUi()
@@ -669,6 +799,27 @@ public sealed class SettingsForm : Form
         var threshold = (decimal)_settings.Whisper.SilenceThreshold;
         threshold = Math.Clamp(threshold, _whisperSilenceUpDown.Minimum, _whisperSilenceUpDown.Maximum);
         _whisperSilenceUpDown.Value = threshold;
+    }
+
+    private void ApplyDisplaySettingsToUi()
+    {
+        _keepMainWindowMaximizedCheckBox.Checked = _settings.KeepMainWindowMaximized;
+        _autoUpdateCheckBox.Checked = _settings.AutoCheckForAppUpdates;
+    }
+
+    private async Task SaveDisplaySettingsFromUiAsync(string? successMessage)
+    {
+        _settings.KeepMainWindowMaximized = _keepMainWindowMaximizedCheckBox.Checked;
+        _settings.AutoCheckForAppUpdates = _autoUpdateCheckBox.Checked;
+
+        await _settingsStore.SaveAsync(_settings);
+
+        if (!string.IsNullOrWhiteSpace(successMessage))
+        {
+            _aboutStatusLabel.Text = successMessage;
+        }
+
+        UpdateAboutInfo(_lastUpdateCheckResult);
     }
 
     private void UpdateSetupGuide()
@@ -689,9 +840,123 @@ public sealed class SettingsForm : Form
                 "4. 必要なら Windows を再起動します。",
                 "5. Discord の入力デバイスを `CABLE Output (VB-Audio Virtual Cable)` にします。",
                 "6. このソフトの再生先を `CABLE Input (VB-Audio Virtual Cable)` にします。",
-                "7. Whisper タブで入力デバイスを選び、必要なモデルをダウンロードします。",
-                "8. `Whisper を開始` を押すと聞き取りを始め、文の終わりごとに自動で読み上げます。",
-                $"9. {whisperState}"
+                "7. 話者の右にある `テスト再生` を押すと、その声で `テストです。` を聞けます。",
+                "8. 必要なら `読み上げた内容を自分のスピーカーでも聞く` をオンにします。",
+                "9. Whisper タブで聞き取る入力デバイスを選び、必要なモデルをダウンロードします。",
+                "10. `Whisper を開始` を押すと聞き取りを始め、文の終わりごとに自動で読み上げます。",
+                $"11. {whisperState}"
+            ]);
+    }
+
+    private async Task PreviewSpeakerAsync()
+    {
+        ToggleVoiceButtons(false);
+
+        try
+        {
+            var client = CreateApiClient();
+            if (!await client.IsEngineAvailableAsync())
+            {
+                throw new InvalidOperationException("VOICEVOX に接続できません。先に VOICEVOX を起動してください。");
+            }
+
+            var outputDevice = (_outputDeviceComboBox.SelectedItem as AudioDeviceItem)
+                ?? _outputDeviceComboBox.Items.Cast<AudioDeviceItem>().FirstOrDefault();
+
+            if (outputDevice is null)
+            {
+                throw new InvalidOperationException("再生先デバイスが見つかりません。");
+            }
+
+            var tuning = CreateVoiceTuningFromUi();
+            var speakerId = (_speakerComboBox.SelectedItem as SpeakerItem)?.StyleId ?? _settings.SelectedSpeakerId;
+            var previewText = "テストです。";
+
+            _voiceStatusLabel.Text = "選んだ話者でテスト再生しています。";
+            var synthesized = await client.SynthesizeAsync(previewText, speakerId, tuning);
+            _previewPlaybackService.Play(synthesized.WaveBytes, outputDevice.DeviceNumber, _monitorSpeechLocallyCheckBox.Checked);
+            _voiceStatusLabel.Text = _monitorSpeechLocallyCheckBox.Checked
+                ? "テスト再生しました。自分のスピーカーにも流しています。"
+                : "テスト再生しました。";
+        }
+        catch (Exception ex)
+        {
+            _voiceStatusLabel.Text = "テスト再生に失敗しました。";
+            MessageBox.Show(this, ex.Message, "テスト再生エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            ToggleVoiceButtons(true);
+        }
+    }
+
+    private async Task CheckForAppUpdatesAsync()
+    {
+        ToggleAboutButtons(false);
+        _aboutStatusLabel.Text = "最新版を確認しています。";
+
+        try
+        {
+            var currentVersion = GetCurrentVersion();
+            _lastUpdateCheckResult = await _appUpdateService.CheckForUpdatesAsync(currentVersion);
+
+            if (_lastUpdateCheckResult.UpdateAvailable)
+            {
+                _aboutStatusLabel.Text = _lastUpdateCheckResult.InstallerAsset is null
+                    ? $"最新版 {_lastUpdateCheckResult.LatestVersion} が見つかりました。Release ページから更新してください。"
+                    : $"最新版 {_lastUpdateCheckResult.LatestVersion} が見つかりました。Release ページから更新できます。";
+            }
+            else
+            {
+                _aboutStatusLabel.Text = $"このアプリは最新です。現在: {currentVersion}";
+            }
+
+            UpdateAboutInfo(_lastUpdateCheckResult);
+        }
+        catch (Exception ex)
+        {
+            _aboutStatusLabel.Text = "最新版の確認に失敗しました。";
+            MessageBox.Show(this, ex.Message, "更新確認エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            ToggleAboutButtons(true);
+        }
+    }
+
+    private void UpdateAboutInfo(AppUpdateCheckResult? updateResult = null)
+    {
+        var currentVersion = GetCurrentVersion();
+        var updateLine = updateResult switch
+        {
+            { UpdateAvailable: true } => $"更新: 最新版 {updateResult.LatestVersion} が公開されています。",
+            { UpdateAvailable: false } => $"更新: 現在の {currentVersion} が最新です。",
+            _ => "更新: まだ確認していません。"
+        };
+
+        _aboutTextBox.Text = string.Join(
+            Environment.NewLine,
+            [
+                $"KikisenApp",
+                $"バージョン: {currentVersion}",
+                updateLine,
+                string.Empty,
+                "クレジット",
+                "- VOICEVOX",
+                "- Whisper / Whisper.net",
+                "- NAudio",
+                "- VB-CABLE",
+                "- .NET",
+                string.Empty,
+                "リンク",
+                $"- GitHub: {ExternalLinks.AppRepository}",
+                $"- Releases: {updateResult?.ReleasePageUrl ?? ExternalLinks.AppReleasesPage}",
+                $"- VOICEVOX: https://voicevox.hiroshiba.jp/",
+                $"- VB-CABLE: {ExternalLinks.VbCablePage}",
+                string.Empty,
+                "メモ",
+                "- Whisper は設定タブで聞き取る入力デバイスを選べます。",
+                "- 常に最大化を有効にすると、メイン画面は通常サイズに戻しても最大化へ戻ります。"
             ]);
     }
 
@@ -716,6 +981,14 @@ public sealed class SettingsForm : Form
         _openVbCableButton.Enabled = enabled;
     }
 
+    private void ToggleVoiceButtons(bool enabled)
+    {
+        _testVoicevoxConnectionButton.Enabled = enabled;
+        _testSpeakerButton.Enabled = enabled;
+        _saveSettingsButton.Enabled = enabled;
+        _reloadDevicesButton.Enabled = enabled;
+    }
+
     private void ToggleWhisperButtons(bool enabled)
     {
         _downloadWhisperModelButton.Enabled = enabled;
@@ -724,11 +997,32 @@ public sealed class SettingsForm : Form
         _reloadWhisperDevicesButton.Enabled = enabled;
     }
 
+    private void ToggleAboutButtons(bool enabled)
+    {
+        _checkForUpdatesButton.Enabled = enabled;
+        _openGitHubButton.Enabled = enabled;
+        _openReleasesPageButton.Enabled = enabled;
+        _saveDisplaySettingsButton.Enabled = enabled;
+    }
+
     private void UpdateWhisperUiState()
     {
         _toggleWhisperButton.Text = _whisperController.IsRunning
             ? "Whisper を停止"
             : "Whisper を開始";
+    }
+
+    private void UpdateWhisperProgressBar(long? receivedBytes, long? totalBytes)
+    {
+        if (receivedBytes.HasValue && totalBytes.HasValue && totalBytes.Value > 0)
+        {
+            _whisperProgressBar.Style = ProgressBarStyle.Continuous;
+            var percent = (int)Math.Clamp(receivedBytes.Value * 100 / totalBytes.Value, 0, 100);
+            _whisperProgressBar.Value = percent;
+            return;
+        }
+
+        _whisperProgressBar.Style = ProgressBarStyle.Marquee;
     }
 
     private void UpdateProgressBar(long? receivedBytes, long? totalBytes)
@@ -932,6 +1226,18 @@ public sealed class SettingsForm : Form
         return panel;
     }
 
+    private VoiceTuningSettings CreateVoiceTuningFromUi()
+    {
+        return new VoiceTuningSettings
+        {
+            SpeedScale = _speedScaleUpDown.Value,
+            PitchScale = _pitchScaleUpDown.Value,
+            IntonationScale = _intonationScaleUpDown.Value,
+            VolumeScale = _volumeScaleUpDown.Value,
+            NormalizeText = _normalizeTextCheckBox.Checked
+        };
+    }
+
     private Control CreateWhisperSegmentPanel()
     {
         var panel = new FlowLayoutPanel
@@ -973,6 +1279,11 @@ public sealed class SettingsForm : Form
             FileName = url,
             UseShellExecute = true
         });
+    }
+
+    private static string GetCurrentVersion()
+    {
+        return Application.ProductVersion;
     }
 
     private sealed record SpeakerItem(int StyleId, string DisplayName)

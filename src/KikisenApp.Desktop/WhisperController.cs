@@ -48,7 +48,11 @@ public sealed class WhisperController : IAsyncDisposable
 
     public IReadOnlyList<AudioInputDeviceItem> GetInputDevices()
     {
-        var devices = new List<AudioInputDeviceItem>();
+        var devices = new List<AudioInputDeviceItem>
+        {
+            new(-1, "Windows の既定の入力デバイス")
+        };
+
         for (var index = 0; index < WaveIn.DeviceCount; index++)
         {
             var capabilities = WaveIn.GetCapabilities(index);
@@ -115,6 +119,11 @@ public sealed class WhisperController : IAsyncDisposable
     private AudioInputDeviceItem? ResolveInputDevice()
     {
         var devices = GetInputDevices();
+        if (string.IsNullOrWhiteSpace(_settings.Whisper.SelectedInputDeviceName))
+        {
+            return devices.FirstOrDefault(x => x.DeviceNumber == -1) ?? devices.FirstOrDefault();
+        }
+
         return devices.FirstOrDefault(x => string.Equals(x.Name, _settings.Whisper.SelectedInputDeviceName, StringComparison.OrdinalIgnoreCase))
             ?? devices.FirstOrDefault();
     }

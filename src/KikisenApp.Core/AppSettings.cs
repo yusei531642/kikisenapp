@@ -8,6 +8,12 @@ public sealed class AppSettings
 
     public string? SelectedOutputDeviceName { get; set; }
 
+    public bool MonitorSpeechLocally { get; set; } = true;
+
+    public bool KeepMainWindowMaximized { get; set; }
+
+    public bool AutoCheckForAppUpdates { get; set; } = true;
+
     public WhisperSettings Whisper { get; set; } = new();
 
     public VoiceTuningSettings VoiceTuning { get; set; } = new();

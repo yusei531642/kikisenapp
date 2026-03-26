@@ -3,6 +3,7 @@ namespace KikisenApp.Core;
 public sealed record AppPaths(
     string RootDirectory,
     string DownloadsDirectory,
+    string UpdatesDirectory,
     string EngineDirectory,
     string WhisperDirectory,
     string AudioDirectory,
@@ -18,6 +19,7 @@ public sealed record AppPaths(
         return new AppPaths(
             RootDirectory: rootDirectory,
             DownloadsDirectory: Path.Combine(rootDirectory, "downloads"),
+            UpdatesDirectory: Path.Combine(rootDirectory, "updates"),
             EngineDirectory: Path.Combine(rootDirectory, "voicevox-engine"),
             WhisperDirectory: Path.Combine(rootDirectory, "whisper"),
             AudioDirectory: Path.Combine(rootDirectory, "audio"),
@@ -29,6 +31,7 @@ public sealed record AppPaths(
     {
         Directory.CreateDirectory(RootDirectory);
         Directory.CreateDirectory(DownloadsDirectory);
+        Directory.CreateDirectory(UpdatesDirectory);
         Directory.CreateDirectory(EngineDirectory);
         Directory.CreateDirectory(WhisperDirectory);
         Directory.CreateDirectory(AudioDirectory);

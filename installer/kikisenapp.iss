@@ -1,5 +1,5 @@
 #define MyAppName "KikisenApp"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.2.2"
 #define MyAppPublisher "Yusei"
 #define MyAppExeName "KikisenApp.Desktop.exe"
 
@@ -32,7 +32,7 @@ Name: "desktopicon"; Description: "デスクトップにショートカットを
 Name: "vbcable"; Description: "VB-CABLE をインストール (インストーラーに同封)"; GroupDescription: "追加セットアップ:"; Flags: checkedonce
 
 [Files]
-Source: "..\publish\win-x64\KikisenApp.Desktop.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 #include "download-files.generated.iss"
 
 [Icons]

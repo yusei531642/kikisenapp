@@ -110,6 +110,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
 ただし、外部配布用の正式な安全表示までは保証できません。
 ほかのPCでも警告を減らしたい場合は、商用のコードサイニング証明書が必要です。
 
+GitHub Release を自動化したい場合は、`.github/workflows/release-installer.yml` を使えます。
+GitHub Secrets に次の2つを入れると、Release 公開時に `setup.exe` を自動署名してアップロードできます。
+
+- `KIKISENAPP_SIGN_PFX_BASE64`: コードサイニング用 `PFX` を Base64 化した文字列
+- `KIKISENAPP_SIGN_PFX_PASSWORD`: その `PFX` のパスワード
+
+Secrets を入れない場合でもワークフローは動きますが、GitHub Actions 上で作られた自己署名証明書になるため、配布先PCでの信頼性は上がりません。
+
 ## 主なフォルダ
 
 - `src/KikisenApp.Core`: 設定、VOICEVOX 通信、セットアップ処理

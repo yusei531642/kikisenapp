@@ -1,5 +1,6 @@
 using KikisenApp.Core;
 using NAudio.Wave;
+using System.Diagnostics;
 using System.Threading.Channels;
 
 namespace KikisenApp.Desktop;
@@ -11,15 +12,16 @@ public sealed class MainForm : Form
     private readonly HttpClient _engineHttpClient;
     private readonly HttpClient _setupHttpClient;
     private readonly VbCableInstaller _vbCableInstaller;
+    private readonly AppUpdateService _appUpdateService;
+    private readonly SpeechPlaybackService _playbackService = new();
     private readonly Channel<string> _whisperSpeechQueue = Channel.CreateUnbounded<string>();
 
     private AppSettings _settings = new();
-    private IWavePlayer? _waveOut;
-    private WaveStream? _currentWaveStream;
-    private MemoryStream? _currentAudioStream;
     private WhisperController? _whisperController;
     private CancellationTokenSource? _whisperQueueCancellationTokenSource;
     private Task? _whisperQueueTask;
+    private bool _isCheckingForAppUpdates;
+    private bool _isForcingMaximized;
 
     private readonly TextBox _speechTextBox = new();
     private readonly Button _speakButton = new();
@@ -38,6 +40,7 @@ public sealed class MainForm : Form
 
         _setupHttpClient = new HttpClient();
         _vbCableInstaller = new VbCableInstaller(_setupHttpClient, _paths);
+        _appUpdateService = new AppUpdateService(_setupHttpClient, _paths);
 
         Text = "KikisenApp";
         Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -61,12 +64,14 @@ public sealed class MainForm : Form
         _statusLabel.Text = "VOICEVOX を確認しています。";
         EnsureWhisperController();
         StartWhisperQueueProcessor();
+        ApplyWindowSettings();
         await RefreshVoicevoxStatusAsync();
+        _ = CheckForAppUpdatesOnStartupAsync();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        StopPlayback();
+        _playbackService.Dispose();
         _whisperSpeechQueue.Writer.TryComplete();
         _whisperQueueCancellationTokenSource?.Cancel();
         _whisperQueueTask?.Wait(TimeSpan.FromSeconds(3));
@@ -146,9 +151,11 @@ public sealed class MainForm : Form
             _settings,
             _engineHttpClient,
             _vbCableInstaller,
-            _whisperController!);
+            _whisperController!,
+            _appUpdateService);
 
         form.ShowDialog(this);
+        ApplyWindowSettings();
     }
 
     private async Task SpeakAsync()
@@ -204,34 +211,6 @@ public sealed class MainForm : Form
         return devices;
     }
 
-    private void PlayWave(byte[] waveBytes, int deviceNumber)
-    {
-        StopPlayback();
-
-        _currentAudioStream = new MemoryStream(waveBytes);
-        _currentWaveStream = new WaveFileReader(_currentAudioStream);
-        _waveOut = new WaveOutEvent
-        {
-            DeviceNumber = deviceNumber
-        };
-        _waveOut.PlaybackStopped += (_, _) => _statusLabel.Text = "再生が終わりました。";
-        _waveOut.Init(_currentWaveStream);
-        _waveOut.Play();
-    }
-
-    private void StopPlayback()
-    {
-        _waveOut?.Stop();
-        _waveOut?.Dispose();
-        _waveOut = null;
-
-        _currentWaveStream?.Dispose();
-        _currentWaveStream = null;
-
-        _currentAudioStream?.Dispose();
-        _currentAudioStream = null;
-    }
-
     private VoicevoxApiClient CreateApiClient()
     {
         return new VoicevoxApiClient(_engineHttpClient);
@@ -267,8 +246,10 @@ public sealed class MainForm : Form
             }
 
             var synthesized = await client.SynthesizeAsync(text, speakerId, _settings.VoiceTuning);
-            PlayWave(synthesized.WaveBytes, outputDevice.DeviceNumber);
-            _statusLabel.Text = $"送信しました: {outputDevice.Name}";
+            _playbackService.Play(synthesized.WaveBytes, outputDevice.DeviceNumber, _settings.MonitorSpeechLocally);
+            _statusLabel.Text = _settings.MonitorSpeechLocally
+                ? $"送信しました: {outputDevice.Name} / 自分のスピーカーでも再生中"
+                : $"送信しました: {outputDevice.Name}";
         }
         finally
         {
@@ -349,6 +330,119 @@ public sealed class MainForm : Form
         _whisperController.SentenceReady += sentence => _whisperSpeechQueue.Writer.TryWrite(sentence);
     }
 
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+
+        if (!_settings.KeepMainWindowMaximized || WindowState != FormWindowState.Normal || _isForcingMaximized)
+        {
+            return;
+        }
+
+        _isForcingMaximized = true;
+        BeginInvoke(() =>
+        {
+            try
+            {
+                if (!IsDisposed && _settings.KeepMainWindowMaximized && WindowState == FormWindowState.Normal)
+                {
+                    WindowState = FormWindowState.Maximized;
+                }
+            }
+            finally
+            {
+                _isForcingMaximized = false;
+            }
+        });
+    }
+
+    private void ApplyWindowSettings()
+    {
+        if (_settings.KeepMainWindowMaximized && WindowState != FormWindowState.Minimized)
+        {
+            WindowState = FormWindowState.Maximized;
+        }
+    }
+
+    private async Task CheckForAppUpdatesOnStartupAsync()
+    {
+        if (!_settings.AutoCheckForAppUpdates || _isCheckingForAppUpdates)
+        {
+            return;
+        }
+
+        _isCheckingForAppUpdates = true;
+
+        try
+        {
+            var update = await _appUpdateService.CheckForUpdatesAsync(GetCurrentVersion());
+            if (!update.UpdateAvailable)
+            {
+                return;
+            }
+
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            BeginInvoke(async () =>
+            {
+                var result = MessageBox.Show(
+                    this,
+                    $"最新版 {update.LatestVersion} が見つかりました。今すぐ更新しますか？",
+                    "KikisenApp 更新",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+
+                if (result != DialogResult.Yes)
+                {
+                    SetStatusSafe($"最新版 {update.LatestVersion} が公開されています。設定の About からも確認できます。");
+                    return;
+                }
+
+                await InstallAppUpdateAsync(update);
+            });
+        }
+        catch (Exception ex)
+        {
+            SetStatusSafe($"更新確認は失敗しましたが、アプリはそのまま使えます: {ex.Message}");
+        }
+        finally
+        {
+            _isCheckingForAppUpdates = false;
+        }
+    }
+
+    private async Task InstallAppUpdateAsync(AppUpdateCheckResult update)
+    {
+        try
+        {
+            if (update.InstallerAsset is null)
+            {
+                OpenUrl(update.ReleasePageUrl);
+                return;
+            }
+
+            var progress = new Progress<SetupProgress>(info => SetStatusSafe(info.Message));
+            var installerPath = await _appUpdateService.DownloadInstallerAsync(update, progress);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = installerPath,
+                WorkingDirectory = Path.GetDirectoryName(installerPath) ?? AppContext.BaseDirectory,
+                UseShellExecute = true
+            });
+
+            SetStatusSafe("最新版のセットアップを起動しました。");
+            BeginInvoke(Close);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     private void StartWhisperQueueProcessor()
     {
         if (_whisperQueueTask is not null)
@@ -380,4 +474,18 @@ public sealed class MainForm : Form
     }
 
     private sealed record AudioDeviceItem(int DeviceNumber, string Name);
+
+    private static string GetCurrentVersion()
+    {
+        return Application.ProductVersion;
+    }
+
+    private static void OpenUrl(string url)
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = url,
+            UseShellExecute = true
+        });
+    }
 }
