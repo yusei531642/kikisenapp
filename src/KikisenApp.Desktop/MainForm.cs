@@ -10,9 +10,7 @@ public sealed class MainForm : Form
     private readonly AppSettingsStore _settingsStore;
     private readonly HttpClient _engineHttpClient;
     private readonly HttpClient _setupHttpClient;
-    private readonly VoicevoxEngineInstaller _voicevoxInstaller;
     private readonly VbCableInstaller _vbCableInstaller;
-    private readonly VoicevoxEngineProcessManager _processManager = new();
     private readonly Channel<string> _whisperSpeechQueue = Channel.CreateUnbounded<string>();
 
     private AppSettings _settings = new();
@@ -39,7 +37,6 @@ public sealed class MainForm : Form
         };
 
         _setupHttpClient = new HttpClient();
-        _voicevoxInstaller = new VoicevoxEngineInstaller(_setupHttpClient, _paths);
         _vbCableInstaller = new VbCableInstaller(_setupHttpClient, _paths);
 
         Text = "KikisenApp";
@@ -64,9 +61,7 @@ public sealed class MainForm : Form
         _statusLabel.Text = "VOICEVOX を確認しています。";
         EnsureWhisperController();
         StartWhisperQueueProcessor();
-
-        await TryAutoStartInstalledEngineAsync();
-        _ = CheckForVoicevoxUpdatesAsync();
+        await RefreshVoicevoxStatusAsync();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -77,7 +72,6 @@ public sealed class MainForm : Form
         _whisperQueueTask?.Wait(TimeSpan.FromSeconds(3));
         _whisperController?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _whisperQueueCancellationTokenSource?.Dispose();
-        _processManager.Stop();
         _engineHttpClient.Dispose();
         _setupHttpClient.Dispose();
         base.OnFormClosing(e);
@@ -148,12 +142,10 @@ public sealed class MainForm : Form
         EnsureWhisperController();
 
         using var form = new SettingsForm(
-            _paths,
             _settingsStore,
             _settings,
             _engineHttpClient,
             _vbCableInstaller,
-            _processManager,
             _whisperController!);
 
         form.ShowDialog(this);
@@ -292,111 +284,25 @@ public sealed class MainForm : Form
             return client;
         }
 
-        var runExecutablePath = FindInstalledRunExecutablePath();
-        if (runExecutablePath is null)
-        {
-            throw new InvalidOperationException("VOICEVOX ENGINE が見つかりません。setup か設定画面からセットアップしてください。");
-        }
-
-        _statusLabel.Text = "VOICEVOX を起動しています。";
-        var startedNow = await _processManager.StartAsync(
-            runExecutablePath,
-            _settings.EngineBaseUrl,
-            CreateApiClient);
-
-        await RememberInstalledEngineAsync(runExecutablePath, _settings.InstalledEngineVersion);
-        _statusLabel.Text = startedNow
-            ? "VOICEVOX を起動しました。"
-            : "VOICEVOX はすでに起動しています。";
-
-        return CreateApiClient();
+        throw new InvalidOperationException($"VOICEVOX に接続できません。VOICEVOX を自分で起動して、設定画面の API URL を確認してください。現在: {_settings.EngineBaseUrl}");
     }
 
-    private async Task TryAutoStartInstalledEngineAsync()
+    private async Task RefreshVoicevoxStatusAsync()
     {
         try
         {
-            var client = await EnsureEngineReadyAsync();
+            var client = CreateApiClient();
             if (await client.IsEngineAvailableAsync())
             {
-                _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
+                _statusLabel.Text = "VOICEVOX につながっています。文字を入れて送信できます。";
+                return;
             }
         }
         catch
         {
-            _statusLabel.Text = "文字を入れて送信できます。細かい設定は右下の設定から開けます。";
-        }
-    }
-
-    private string? FindInstalledRunExecutablePath()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.InstalledEnginePath) && Directory.Exists(_settings.InstalledEnginePath))
-        {
-            var configuredPath = Directory
-                .EnumerateFiles(_settings.InstalledEnginePath, "run.exe", SearchOption.AllDirectories)
-                .FirstOrDefault();
-
-            if (configuredPath is not null)
-            {
-                return configuredPath;
-            }
         }
 
-        return Directory.Exists(_paths.EngineDirectory)
-            ? Directory.EnumerateFiles(_paths.EngineDirectory, "run.exe", SearchOption.AllDirectories).FirstOrDefault()
-            : null;
-    }
-
-    private async Task CheckForVoicevoxUpdatesAsync()
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2));
-
-            var update = await _voicevoxInstaller.EnsureLatestInstalledAsync(_settings.InstalledEngineVersion);
-            await RememberInstalledEngineAsync(update.RunExecutablePath, update.Version);
-
-            if (!update.UpdatedFromOlderVersion || !update.InstalledNow)
-            {
-                return;
-            }
-
-            var client = CreateApiClient();
-            if (!await client.IsEngineAvailableAsync())
-            {
-                await _processManager.StartAsync(
-                    update.RunExecutablePath,
-                    _settings.EngineBaseUrl,
-                    CreateApiClient);
-
-                SetStatusSafe("新しい VOICEVOX を自動更新して起動しました。");
-                return;
-            }
-
-            SetStatusSafe("新しい VOICEVOX を自動ダウンロードしました。次回から使えます。");
-        }
-        catch
-        {
-        }
-    }
-
-    private async Task RememberInstalledEngineAsync(string runExecutablePath, string? version)
-    {
-        var engineDirectory = Path.GetDirectoryName(runExecutablePath);
-        if (string.IsNullOrWhiteSpace(engineDirectory))
-        {
-            return;
-        }
-
-        if (string.Equals(_settings.InstalledEnginePath, engineDirectory, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(_settings.InstalledEngineVersion, version, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        _settings.InstalledEnginePath = engineDirectory;
-        _settings.InstalledEngineVersion = version;
-        await _settingsStore.SaveAsync(_settings);
+        _statusLabel.Text = $"VOICEVOX につながっていません。設定で API URL を確認してください。現在: {_settings.EngineBaseUrl}";
     }
 
     private void SetStatusSafe(string text)

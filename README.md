@@ -7,7 +7,8 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 - メイン画面は `入力` と `送信` だけのシンプル構成
 - 話者、再生先、音量などの細かい設定は別ウィンドウに分離
-- `VOICEVOX ENGINE` は `setup.exe` 側で導入
+- `VOICEVOX` は自分でインストールして使う前提
+- 設定画面で `VOICEVOX API URL` を変更して接続確認できる
 - `VB-CABLE Virtual Audio Device` をインストーラーに同封
 - `Whisper` は設定画面の専用タブから、モデルの重さを見て選んでダウンロード
 - `setup.exe` 形式のインストーラーを作成可能
@@ -17,10 +18,8 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 - 文字を入力して VOICEVOX で読み上げ
 - 再生先デバイスを選んで、VB-CABLE などの仮想オーディオへ出力
-- `setup.exe` 実行中に VOICEVOX ENGINE の最新 Windows GPU 版を外部ダウンロード
 - `VB-CABLE Virtual Audio Device` はインストーラー同封のファイルからセットアップ起動
-- `setup.exe` 後にアプリを開くと、見つかった `VOICEVOX ENGINE` を自動で起動しやすい
-- アプリ起動時に `VOICEVOX ENGINE` の新しい GitHub Release を自動確認して、必要なら自動ダウンロード
+- `VOICEVOX API URL` を設定画面から保存して接続確認
 - Whisper でリアルタイムに聞き取り、文章の終わりごとに VOICEVOX で自動読み上げ
 - Discord で使うための手順をアプリ内で確認
 - メイン画面は「入力」と「送信」だけにして、細かい設定は `設定` ウィンドウに分離
@@ -28,9 +27,7 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 ## 動作環境
 
 - Windows 11 / Windows 10 x64
-- NVIDIA GPU があれば `VOICEVOX ENGINE NVIDIA版` を優先
-- NVIDIA GPU がない場合は `DirectML版` を使用
-- `setup.exe` 実行時は VOICEVOX ダウンロードのためインターネット接続が必要
+- VOICEVOX が HTTP API を使える状態で起動していること
 - `VB-CABLE` の導入には管理者権限が必要
 - Whisper モデルのダウンロード時もインターネット接続が必要
 
@@ -41,26 +38,32 @@ Discord に仮想マイク経由で VOICEVOX の音声を流すための Windows
 
 ## 先に知っておいてほしいこと
 
-- VOICEVOX ENGINE は `setup.exe` 側で入れる前提です。
-- このPCでは GPU を見て、`NVIDIA版` を優先し、使えない場合は `DirectML版` に切り替えます。
-- `setup.exe` では `VB-CABLE` を同封し、`VOICEVOX ENGINE` はセットアップ中に外部ダウンロードします。
-- ただし、Windows の仕様で管理者権限の許可と、場合によっては再起動が必要です。
+- VOICEVOX は自分でインストールしてください。
+- このアプリは VOICEVOX の API に接続して読み上げます。
+- API URL の初期値は `http://127.0.0.1:50021` です。
+- `setup.exe` には `VB-CABLE` を同封しています。導入時は管理者権限の許可と、場合によっては再起動が必要です。
 
 ## 使い方
 
 1. `KikisenApp-Setup.exe` を起動します。
-2. インストーラーで `VOICEVOX ENGINE` と `VB-CABLE` のチェックを入れたまま進めます。
-3. `VOICEVOX ENGINE` の外部ダウンロード完了まで待ちます。
-4. `VB-CABLE` のセットアップ画面が開いたら、管理者権限を許可して完了します。
-5. 必要なら Windows を再起動します。
+2. インストーラーで `VB-CABLE` のチェックを入れたまま進めます。
+3. `VB-CABLE` のセットアップ画面が開いたら、管理者権限を許可して完了します。
+4. 必要なら Windows を再起動します。
+5. VOICEVOX を自分でインストールして起動します。
 6. アプリを起動して右下の `設定` を押します。
-7. ふつうは自動で `VOICEVOX` を見つけて起動します。うまくいかないときだけ `VOICEVOX を起動` を押します。
+7. `音声設定` タブで `VOICEVOX API URL` を確認して `接続確認` を押します。
 8. Discord の入力デバイスを `CABLE Output` にします。
 9. `音声設定` タブで再生先を `CABLE Input` にして保存します。
 10. `Whisper` タブで入力デバイスを選び、使いたいモデルを選びます。重いモデルほど精度は上がりやすいですが、ダウンロードも起動も重くなります。
 11. `モデルをダウンロード` を押して、準備が終わったら `Whisper を開始` を押します。
 12. 話した内容は文の終わりごとに自動で VOICEVOX から読み上げられます。
 13. 手入力で読み上げたいときは、メイン画面に戻って文字を入れ、`送信` を押します。
+
+## VOICEVOX の準備
+
+- 公式サイト: [VOICEVOX](https://voicevox.hiroshiba.jp/)
+- API URL の初期値: `http://127.0.0.1:50021`
+- つながらないときは、VOICEVOX が起動しているかと、設定画面の API URL が合っているかを確認してください。
 
 ## 開発環境の準備
 

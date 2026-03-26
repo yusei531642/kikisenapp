@@ -29,7 +29,6 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "デスクトップにショートカットを作成"; GroupDescription: "追加アイコン:"; Flags: unchecked
-Name: "voicevox"; Description: "VOICEVOX ENGINE をインストール (外部ダウンロード)"; GroupDescription: "追加セットアップ:"; Flags: checkedonce
 Name: "vbcable"; Description: "VB-CABLE をインストール (インストーラーに同封)"; GroupDescription: "追加セットアップ:"; Flags: checkedonce
 
 [Files]
@@ -48,70 +47,15 @@ Filename: "{tmp}\VBCABLE\VBCABLE_Setup.exe"; Description: "VB-CABLE をインス
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} を起動"; Flags: nowait postinstall skipifsilent
 
 [Code]
-var
-  GpuDetectionDone: Boolean;
-  GpuIsNvidia: Boolean;
-
 function ShouldInstallVbCable: Boolean;
 begin
   Result := WizardIsTaskSelected('vbcable');
-end;
-
-function ShouldInstallVoicevox: Boolean;
-begin
-  Result := WizardIsTaskSelected('voicevox');
-end;
-
-function DetectNvidiaGpu: Boolean;
-var
-  ResultCode: Integer;
-  Output: TExecOutput;
-  StdOutText: String;
-begin
-  if GpuDetectionDone then
-  begin
-    Result := GpuIsNvidia;
-    exit;
-  end;
-
-  GpuDetectionDone := True;
-  GpuIsNvidia := False;
-
-  if ExecAndCaptureOutput(
-    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -ExecutionPolicy Bypass -Command "$gpu = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match ''NVIDIA'' -or $_.AdapterCompatibility -match ''NVIDIA'' } | Select-Object -First 1; if ($gpu) { Write-Output ''nvidia'' } else { Write-Output ''other'' }"',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode,
-    Output) then
-  begin
-    StdOutText := Trim(StringJoin('', Output.StdOut));
-    GpuIsNvidia := (ResultCode = 0) and SameText(StdOutText, 'nvidia');
-  end;
-
-  Result := GpuIsNvidia;
-end;
-
-function ShouldInstallVoicevoxNvidia: Boolean;
-begin
-  Result := ShouldInstallVoicevox and DetectNvidiaGpu;
-end;
-
-function ShouldInstallVoicevoxDirectMl: Boolean;
-begin
-  Result := ShouldInstallVoicevox and not DetectNvidiaGpu;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    if ShouldInstallVoicevox then
-    begin
-      Log('VOICEVOX ENGINE was downloaded and extracted by Setup.');
-    end;
-
     if ShouldInstallVbCable then
     begin
       SuppressibleMsgBox(
