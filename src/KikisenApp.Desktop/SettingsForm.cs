@@ -7,12 +7,10 @@ namespace KikisenApp.Desktop;
 
 public sealed class SettingsForm : Form
 {
-    private readonly AppPaths _paths;
     private readonly AppSettingsStore _settingsStore;
     private readonly AppSettings _settings;
     private readonly HttpClient _engineHttpClient;
     private readonly VbCableInstaller _vbCableInstaller;
-    private readonly VoicevoxEngineProcessManager _processManager;
     private readonly WhisperController _whisperController;
 
     private List<SpeakerItem> _speakerItems = [];
@@ -24,14 +22,16 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _pitchScaleUpDown = new();
     private readonly NumericUpDown _intonationScaleUpDown = new();
     private readonly NumericUpDown _volumeScaleUpDown = new();
+    private readonly TextBox _engineBaseUrlTextBox = new();
     private readonly CheckBox _normalizeTextCheckBox = new();
     private readonly Button _reloadDevicesButton = new();
+    private readonly Button _testVoicevoxConnectionButton = new();
     private readonly Button _saveSettingsButton = new();
     private readonly Label _voiceStatusLabel = new();
     private readonly TextBox _setupLogTextBox = new();
     private readonly ProgressBar _setupProgressBar = new();
     private readonly Label _setupStatusLabel = new();
-    private readonly Button _startVoicevoxButton = new();
+    private readonly Button _openVoicevoxPageButton = new();
     private readonly Button _installVbCableButton = new();
     private readonly Button _openVbCableButton = new();
     private readonly ComboBox _whisperModelComboBox = new();
@@ -48,20 +48,16 @@ public sealed class SettingsForm : Form
     private readonly TextBox _guideTextBox = new();
 
     public SettingsForm(
-        AppPaths paths,
         AppSettingsStore settingsStore,
         AppSettings settings,
         HttpClient engineHttpClient,
         VbCableInstaller vbCableInstaller,
-        VoicevoxEngineProcessManager processManager,
         WhisperController whisperController)
     {
-        _paths = paths;
         _settingsStore = settingsStore;
         _settings = settings;
         _engineHttpClient = engineHttpClient;
         _vbCableInstaller = vbCableInstaller;
-        _processManager = processManager;
         _whisperController = whisperController;
 
         Text = "設定";
@@ -90,7 +86,6 @@ public sealed class SettingsForm : Form
         ReloadWhisperInputDevices();
         LoadWhisperModels();
         UpdateWhisperUiState();
-        await TryAutoStartVoicevoxAsync();
         await LoadSpeakersAsync();
         UpdateSetupGuide();
     }
@@ -129,17 +124,21 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 6,
+            RowCount = 7,
             Padding = new Padding(12)
         };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        _engineBaseUrlTextBox.Dock = DockStyle.Fill;
+        _engineBaseUrlTextBox.Text = _settings.EngineBaseUrl;
 
         _speakerComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _speakerComboBox.Dock = DockStyle.Fill;
@@ -159,6 +158,10 @@ public sealed class SettingsForm : Form
         _reloadDevicesButton.AutoSize = true;
         _reloadDevicesButton.Click += (_, _) => ReloadAudioDevices();
 
+        _testVoicevoxConnectionButton.Text = "接続確認";
+        _testVoicevoxConnectionButton.AutoSize = true;
+        _testVoicevoxConnectionButton.Click += async (_, _) => await CheckVoicevoxConnectionAsync();
+
         _saveSettingsButton.Text = "保存";
         _saveSettingsButton.AutoSize = true;
         _saveSettingsButton.Click += async (_, _) => await SaveSettingsFromUiAsync("設定を保存しました。");
@@ -167,17 +170,20 @@ public sealed class SettingsForm : Form
         _voiceStatusLabel.AutoEllipsis = true;
         _voiceStatusLabel.Text = "ここで話者や再生先を変えられます。";
 
-        table.Controls.Add(CreateLabel("話者"), 0, 0);
-        table.Controls.Add(_speakerComboBox, 1, 0);
+        table.Controls.Add(CreateLabel("VOICEVOX API URL"), 0, 0);
+        table.Controls.Add(CreateRowPanel(_engineBaseUrlTextBox, _testVoicevoxConnectionButton), 1, 0);
 
-        table.Controls.Add(CreateLabel("再生先デバイス"), 0, 1);
-        table.Controls.Add(CreateRowPanel(_outputDeviceComboBox, _reloadDevicesButton), 1, 1);
+        table.Controls.Add(CreateLabel("話者"), 0, 1);
+        table.Controls.Add(_speakerComboBox, 1, 1);
 
-        table.Controls.Add(CreateLabel("話し方"), 0, 2);
-        table.Controls.Add(CreateVoiceTuningPanel(), 1, 2);
+        table.Controls.Add(CreateLabel("再生先デバイス"), 0, 2);
+        table.Controls.Add(CreateRowPanel(_outputDeviceComboBox, _reloadDevicesButton), 1, 2);
 
-        table.Controls.Add(CreateLabel("文字の整形"), 0, 3);
-        table.Controls.Add(_normalizeTextCheckBox, 1, 3);
+        table.Controls.Add(CreateLabel("話し方"), 0, 3);
+        table.Controls.Add(CreateVoiceTuningPanel(), 1, 3);
+
+        table.Controls.Add(CreateLabel("文字の整形"), 0, 4);
+        table.Controls.Add(_normalizeTextCheckBox, 1, 4);
 
         var bottomPanel = new FlowLayoutPanel
         {
@@ -188,7 +194,7 @@ public sealed class SettingsForm : Form
         bottomPanel.Controls.Add(_saveSettingsButton);
         bottomPanel.Controls.Add(_voiceStatusLabel);
 
-        table.Controls.Add(bottomPanel, 0, 4);
+        table.Controls.Add(bottomPanel, 0, 5);
         table.SetColumnSpan(bottomPanel, 2);
 
         page.Controls.Add(table);
@@ -215,14 +221,14 @@ public sealed class SettingsForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        _setupStatusLabel.Text = "必要なものをここで準備できます。";
+        _setupStatusLabel.Text = "VOICEVOX は自分で入れて起動してください。ここでは接続先や VB-CABLE を整えます。";
         _setupStatusLabel.Dock = DockStyle.Fill;
 
         _setupProgressBar.Dock = DockStyle.Fill;
 
-        _startVoicevoxButton.Text = "VOICEVOX を起動";
-        _startVoicevoxButton.AutoSize = true;
-        _startVoicevoxButton.Click += async (_, _) => await StartVoicevoxAsync();
+        _openVoicevoxPageButton.Text = "VOICEVOX 公式ページを開く";
+        _openVoicevoxPageButton.AutoSize = true;
+        _openVoicevoxPageButton.Click += (_, _) => OpenUrl("https://voicevox.hiroshiba.jp/");
 
         _installVbCableButton.Text = "VB-CABLE を自動セットアップ";
         _installVbCableButton.AutoSize = true;
@@ -236,7 +242,7 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
-            Text = "VB-CABLE は管理者権限の許可が必要です。導入後は再起動すると安定します。"
+            Text = "VOICEVOX は自分で起動して、必要なら音声設定タブの API URL を合わせてください。VB-CABLE は管理者権限の許可が必要です。"
         };
 
         _setupLogTextBox.Multiline = true;
@@ -251,7 +257,7 @@ public sealed class SettingsForm : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = true
         };
-        buttonPanel.Controls.Add(_startVoicevoxButton);
+        buttonPanel.Controls.Add(_openVoicevoxPageButton);
         buttonPanel.Controls.Add(_installVbCableButton);
         buttonPanel.Controls.Add(_openVbCableButton);
 
@@ -381,7 +387,7 @@ public sealed class SettingsForm : Form
             var client = CreateApiClient();
             if (!await client.IsEngineAvailableAsync())
             {
-                _voiceStatusLabel.Text = "VOICEVOX ENGINE が未起動です。セットアップで起動してください。";
+                _voiceStatusLabel.Text = $"VOICEVOX に接続できません。VOICEVOX を起動して API URL を確認してください。現在: {_settings.EngineBaseUrl}";
                 return;
             }
 
@@ -469,6 +475,7 @@ public sealed class SettingsForm : Form
 
     private async Task SaveSettingsFromUiAsync(string? successMessage)
     {
+        _settings.EngineBaseUrl = NormalizeEngineBaseUrl(_engineBaseUrlTextBox.Text);
         _settings.SelectedSpeakerId = (_speakerComboBox.SelectedItem as SpeakerItem)?.StyleId ?? _settings.SelectedSpeakerId;
         _settings.SelectedOutputDeviceName = (_outputDeviceComboBox.SelectedItem as AudioDeviceItem)?.Name;
         _settings.VoiceTuning.SpeedScale = _speedScaleUpDown.Value;
@@ -476,6 +483,7 @@ public sealed class SettingsForm : Form
         _settings.VoiceTuning.IntonationScale = _intonationScaleUpDown.Value;
         _settings.VoiceTuning.VolumeScale = _volumeScaleUpDown.Value;
         _settings.VoiceTuning.NormalizeText = _normalizeTextCheckBox.Checked;
+        _engineHttpClient.BaseAddress = new Uri($"{_settings.EngineBaseUrl.TrimEnd('/')}/");
 
         await _settingsStore.SaveAsync(_settings);
 
@@ -502,39 +510,34 @@ public sealed class SettingsForm : Form
         }
     }
 
-    private async Task StartVoicevoxAsync()
+    private async Task CheckVoicevoxConnectionAsync()
     {
-        ToggleSetupButtons(false);
+        _testVoicevoxConnectionButton.Enabled = false;
 
         try
         {
-            var runExecutablePath = FindRunExecutablePath();
-            if (runExecutablePath is null)
+            await SaveSettingsFromUiAsync(null);
+
+            var available = await CreateApiClient().IsEngineAvailableAsync();
+            _setupStatusLabel.Text = available
+                ? "VOICEVOX に接続できました。"
+                : $"VOICEVOX に接続できません。VOICEVOX を起動して API URL を確認してください。現在: {_settings.EngineBaseUrl}";
+            AppendSetupLog($"{DateTime.Now:HH:mm:ss} {_setupStatusLabel.Text}");
+
+            if (available)
             {
-                throw new InvalidOperationException("先に VOICEVOX をセットアップしてください。");
+                await LoadSpeakersAsync();
             }
-
-            var startedNow = await _processManager.StartAsync(
-                runExecutablePath,
-                _settings.EngineBaseUrl,
-                CreateApiClient);
-
-            _setupStatusLabel.Text = startedNow
-                ? "VOICEVOX ENGINE を起動しました。"
-                : "VOICEVOX ENGINE はすでに起動しています。";
-
-            AppendSetupLog(_setupStatusLabel.Text);
-            await LoadSpeakersAsync();
         }
         catch (Exception ex)
         {
-            _setupStatusLabel.Text = "VOICEVOX の起動に失敗しました。";
+            _setupStatusLabel.Text = "VOICEVOX の接続確認に失敗しました。";
             AppendSetupLog($"エラー: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "VOICEVOX 起動失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "VOICEVOX 接続確認失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
-            ToggleSetupButtons(true);
+            _testVoicevoxConnectionButton.Enabled = true;
         }
     }
 
@@ -650,6 +653,7 @@ public sealed class SettingsForm : Form
 
     private void ApplySettingsToUi()
     {
+        _engineBaseUrlTextBox.Text = _settings.EngineBaseUrl;
         _speedScaleUpDown.Value = _settings.VoiceTuning.SpeedScale;
         _pitchScaleUpDown.Value = _settings.VoiceTuning.PitchScale;
         _intonationScaleUpDown.Value = _settings.VoiceTuning.IntonationScale;
@@ -667,30 +671,9 @@ public sealed class SettingsForm : Form
         _whisperSilenceUpDown.Value = threshold;
     }
 
-    private string? FindRunExecutablePath()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.InstalledEnginePath) && Directory.Exists(_settings.InstalledEnginePath))
-        {
-            var configuredPath = Directory
-                .EnumerateFiles(_settings.InstalledEnginePath, "run.exe", SearchOption.AllDirectories)
-                .FirstOrDefault();
-
-            if (configuredPath is not null)
-            {
-                return configuredPath;
-            }
-        }
-
-        return Directory.Exists(_paths.EngineDirectory)
-            ? Directory.EnumerateFiles(_paths.EngineDirectory, "run.exe", SearchOption.AllDirectories).FirstOrDefault()
-            : null;
-    }
-
     private void UpdateSetupGuide()
     {
-        var voicevoxState = FindRunExecutablePath() is null
-            ? "1. まだ VOICEVOX ENGINE が見つかっていません。まずは setup.exe から入れてください。"
-            : "1. VOICEVOX ENGINE は導入済みです。必要ならセットアップタブから起動してください。";
+        var voicevoxState = $"1. VOICEVOX は自分でインストールして起動してください。API URL は通常 `{_settings.EngineBaseUrl}` です。";
 
         var whisperState = _whisperController.IsModelInstalled(_settings.Whisper.SelectedModelId)
             ? "Whisper モデルは準備済みです。Whisper タブで開始すると聞き取り後に自動で読み上げます。"
@@ -701,13 +684,14 @@ public sealed class SettingsForm : Form
             [
                 "使い方",
                 voicevoxState,
-                "2. `VB-CABLE を自動セットアップ` を押して、管理者権限を許可します。",
-                "3. 必要なら Windows を再起動します。",
-                "4. Discord の入力デバイスを `CABLE Output (VB-Audio Virtual Cable)` にします。",
-                "5. このソフトの再生先を `CABLE Input (VB-Audio Virtual Cable)` にします。",
-                "6. Whisper タブで入力デバイスを選び、必要なモデルをダウンロードします。",
-                "7. `Whisper を開始` を押すと聞き取りを始め、文の終わりごとに自動で読み上げます。",
-                $"8. {whisperState}"
+                "2. 音声設定タブで API URL を確認して、`接続確認` を押します。",
+                "3. `VB-CABLE を自動セットアップ` を押して、管理者権限を許可します。",
+                "4. 必要なら Windows を再起動します。",
+                "5. Discord の入力デバイスを `CABLE Output (VB-Audio Virtual Cable)` にします。",
+                "6. このソフトの再生先を `CABLE Input (VB-Audio Virtual Cable)` にします。",
+                "7. Whisper タブで入力デバイスを選び、必要なモデルをダウンロードします。",
+                "8. `Whisper を開始` を押すと聞き取りを始め、文の終わりごとに自動で読み上げます。",
+                $"9. {whisperState}"
             ]);
     }
 
@@ -727,7 +711,7 @@ public sealed class SettingsForm : Form
 
     private void ToggleSetupButtons(bool enabled)
     {
-        _startVoicevoxButton.Enabled = enabled;
+        _openVoicevoxPageButton.Enabled = enabled;
         _installVbCableButton.Enabled = enabled;
         _openVbCableButton.Enabled = enabled;
     }
@@ -796,30 +780,15 @@ public sealed class SettingsForm : Form
         return new VoicevoxApiClient(_engineHttpClient);
     }
 
-    private async Task TryAutoStartVoicevoxAsync()
+    private static string NormalizeEngineBaseUrl(string? baseUrl)
     {
-        try
+        var value = (baseUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
         {
-            var runExecutablePath = FindRunExecutablePath();
-            if (runExecutablePath is null)
-            {
-                return;
-            }
-
-            var startedNow = await _processManager.StartAsync(
-                runExecutablePath,
-                _settings.EngineBaseUrl,
-                CreateApiClient);
-
-            if (startedNow)
-            {
-                _setupStatusLabel.Text = "VOICEVOX ENGINE を自動で起動しました。";
-                AppendSetupLog(_setupStatusLabel.Text);
-            }
+            return "http://127.0.0.1:50021";
         }
-        catch
-        {
-        }
+
+        return value.TrimEnd('/');
     }
 
     private void OnWhisperStatusChanged(string message)
@@ -1004,15 +973,6 @@ public sealed class SettingsForm : Form
             FileName = url,
             UseShellExecute = true
         });
-    }
-
-    private static string FormatVariantName(VoicevoxEngineVariant variant)
-    {
-        return variant switch
-        {
-            VoicevoxEngineVariant.Nvidia => "(NVIDIA GPU版)",
-            _ => "(DirectML GPU版)"
-        };
     }
 
     private sealed record SpeakerItem(int StyleId, string DisplayName)
