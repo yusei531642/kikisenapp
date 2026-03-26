@@ -92,8 +92,8 @@ public static class VoicevoxVersionComparer
 {
     public static bool IsNewerVersion(string latestVersion, string? installedVersion)
     {
-        var normalizedLatest = Normalize(latestVersion);
-        var normalizedInstalled = Normalize(installedVersion);
+        var normalizedLatest = AppVersionResolver.Normalize(latestVersion);
+        var normalizedInstalled = AppVersionResolver.Normalize(installedVersion);
 
         if (string.IsNullOrWhiteSpace(normalizedLatest))
         {
@@ -116,6 +116,6 @@ public static class VoicevoxVersionComparer
 
     private static string Normalize(string? version)
     {
-        return (version ?? string.Empty).Trim().TrimStart('v', 'V');
+        return AppVersionResolver.Normalize(version);
     }
 }

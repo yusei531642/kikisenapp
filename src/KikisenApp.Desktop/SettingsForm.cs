@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Reflection;
 using KikisenApp.Core;
 using NAudio.Wave;
 
@@ -898,7 +899,7 @@ public sealed class SettingsForm : Form
         try
         {
             var currentVersion = GetCurrentVersion();
-            _lastUpdateCheckResult = await _appUpdateService.CheckForUpdatesAsync(currentVersion);
+            _lastUpdateCheckResult = await _appUpdateService.CheckForUpdatesAsync(GetCurrentVersions());
 
             if (_lastUpdateCheckResult.UpdateAvailable)
             {
@@ -1284,6 +1285,34 @@ public sealed class SettingsForm : Form
     private static string GetCurrentVersion()
     {
         return Application.ProductVersion;
+    }
+
+    private static IReadOnlyList<string?> GetCurrentVersions()
+    {
+        var versions = new List<string?>();
+
+        versions.Add(Application.ProductVersion);
+
+        var fileVersionInfo = FileVersionInfo.GetVersionInfo(Application.ExecutablePath);
+        versions.Add(fileVersionInfo.ProductVersion);
+        versions.Add(fileVersionInfo.FileVersion);
+
+        var entryAssembly = Assembly.GetEntryAssembly();
+        versions.Add(entryAssembly?.GetName().Version?.ToString());
+
+        var informationalVersion = entryAssembly?
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            versions.Add(informationalVersion.Split('+')[0]);
+        }
+
+        return versions
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private sealed record SpeakerItem(int StyleId, string DisplayName)

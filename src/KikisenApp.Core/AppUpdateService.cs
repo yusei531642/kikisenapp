@@ -20,7 +20,7 @@ public sealed class AppUpdateService
     }
 
     public async Task<AppUpdateCheckResult> CheckForUpdatesAsync(
-        string currentVersion,
+        IEnumerable<string?> currentVersions,
         CancellationToken cancellationToken = default)
     {
         var release = await _httpClient.GetFromJsonAsync<GitHubReleaseResponse>(
@@ -29,13 +29,15 @@ public sealed class AppUpdateService
             ?? throw new InvalidOperationException("最新版の情報を取得できませんでした。");
 
         var installerAsset = AppReleaseAssetSelector.SelectInstallerAsset(release);
+        var installedVersions = currentVersions.ToList();
 
         return new AppUpdateCheckResult(
-            CurrentVersion: currentVersion,
+            CurrentVersion: installedVersions.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
+            InstalledVersions: installedVersions,
             LatestVersion: release.TagName,
             ReleasePageUrl: string.IsNullOrWhiteSpace(release.HtmlUrl) ? ExternalLinks.AppReleasesPage : release.HtmlUrl,
             InstallerAsset: installerAsset,
-            UpdateAvailable: VoicevoxVersionComparer.IsNewerVersion(release.TagName, currentVersion));
+            UpdateAvailable: AppVersionResolver.HasUpdate(release.TagName, installedVersions.ToArray()));
     }
 
     public async Task<string> DownloadInstallerAsync(
@@ -141,6 +143,7 @@ public static class AppReleaseAssetSelector
 
 public sealed record AppUpdateCheckResult(
     string CurrentVersion,
+    IReadOnlyList<string?> InstalledVersions,
     string LatestVersion,
     string ReleasePageUrl,
     GitHubReleaseAsset? InstallerAsset,
